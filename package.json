@@ -1,0 +1,96 @@
+{
+  "name": "branch-diff",
+  "displayName": "Branch Diff",
+  "description": "Browse files changed between your checked-out branch and another branch.",
+  "version": "0.1.0",
+  "publisher": "branch-diff-local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": ["SCM Providers", "Other"],
+  "keywords": ["git", "branch", "diff", "compare"],
+  "main": "./dist/extension.js",
+  "extensionKind": ["workspace"],
+  "extensionDependencies": ["vscode.git"],
+  "activationEvents": ["onView:branchDiff.files"],
+  "capabilities": {
+    "virtualWorkspaces": false,
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Branch Diff runs Git in the workspace to compare branches."
+    }
+  },
+  "contributes": {
+    "commands": [
+      { "command": "branchDiff.selectBranch", "title": "Select Comparison Branch", "category": "Branch Diff", "icon": "$(git-branch)" },
+      { "command": "branchDiff.selectRepository", "title": "Select Repository", "category": "Branch Diff", "icon": "$(repo)" },
+      { "command": "branchDiff.refresh", "title": "Refresh", "category": "Branch Diff", "icon": "$(refresh)" },
+      { "command": "branchDiff.toggleMarkers", "title": "Toggle Branch Markers", "category": "Branch Diff" },
+      { "command": "branchDiff.enableMarkers", "title": "Enable Branch Markers (Currently Off)", "category": "Branch Diff", "icon": "$(eye-closed)" },
+      { "command": "branchDiff.disableMarkers", "title": "Disable Branch Markers (Currently On)", "category": "Branch Diff", "icon": "$(eye)" },
+      { "command": "branchDiff.openDiff", "title": "Open Diff", "category": "Branch Diff", "icon": "$(diff)" }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        { "id": "branchDiff", "title": "Branch Diff", "icon": "media/branch-diff.svg" }
+      ]
+    },
+    "views": {
+      "branchDiff": [
+        { "id": "branchDiff.files", "name": "Changed Files", "contextualTitle": "Branch Diff" }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        { "command": "branchDiff.selectBranch", "when": "view == branchDiff.files", "group": "navigation@1" },
+        { "command": "branchDiff.selectRepository", "when": "view == branchDiff.files && branchDiff.repositoryCount > 1", "group": "navigation@2" },
+        { "command": "branchDiff.disableMarkers", "when": "view == branchDiff.files && branchDiff.markersEnabled", "group": "navigation@3" },
+        { "command": "branchDiff.enableMarkers", "when": "view == branchDiff.files && !branchDiff.markersEnabled", "group": "navigation@3" },
+        { "command": "branchDiff.refresh", "when": "view == branchDiff.files", "group": "navigation@4" }
+      ],
+      "view/item/context": [
+        { "command": "branchDiff.openDiff", "when": "view == branchDiff.files && viewItem == branchDiff.change", "group": "inline" }
+      ],
+      "commandPalette": [
+        { "command": "branchDiff.openDiff", "when": "false" },
+        { "command": "branchDiff.toggleMarkers", "when": "false" },
+        { "command": "branchDiff.disableMarkers", "when": "branchDiff.markersEnabled" },
+        { "command": "branchDiff.enableMarkers", "when": "!branchDiff.markersEnabled" }
+      ]
+    },
+    "configuration": {
+      "title": "Branch Diff",
+      "properties": {
+        "branchDiff.defaultBaseBranch": {
+          "type": "string",
+          "default": "main",
+          "minLength": 1,
+          "scope": "resource",
+          "description": "Initial comparison branch for each repository. The branch picker remembers subsequent selections per workspace and repository."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "check": "tsc -p . --noEmit",
+    "test": "npm run compile && node --test test/*.test.cjs",
+    "test:vscode": "npm run compile && node test/run-vscode.cjs",
+    "package": "vsce package --allow-missing-repository"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.95.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^4.1.1",
+    "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "@vscode/vsce": {
+      "minimatch": "^11.0.1"
+    }
+  }
+}
