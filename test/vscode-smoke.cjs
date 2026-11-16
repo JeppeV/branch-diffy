@@ -339,8 +339,9 @@ async function run() {
       }, `${state}: the native inline preview offers both providers and prefers the updated local Git change`);
       assert.equal(await workbench(`document.querySelector('.dirty-diff .dropdown select').value`),
         'Git local working changes', `${state}: opening the shared anchor still prefers local Git`);
-      assert.equal(await workbench(`!!document.querySelector('.margin-view-overlays .dirty-diff-deleted')`),
-        true, `${state}: native Git still paints its deletion marker`);
+      // The preview can update before the outer editor paints its gutter decorations.
+      await waitFor(() => workbench(`!!document.querySelector('.margin-view-overlays .dirty-diff-deleted')`),
+        `${state}: native Git still paints its deletion marker`);
       for (const [provider, showsBranch] of [['Branch Diffy (main)', true], ['Git local working changes', false]]) {
         await workbench(`(() => {
           const select = document.querySelector('.dirty-diff .dropdown select');
