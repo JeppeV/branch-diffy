@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  # Releases are started manually; pushes only run CI.
   workflow_dispatch:
     inputs:
       draft:
