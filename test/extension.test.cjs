@@ -41,7 +41,7 @@ function loadWithVscode(filename, vscode, cache = new Map()) {
   const nodeRequire = createRequire(filename);
   const localRequire = (name) => {
     if (name === 'vscode') { return vscode; }
-    if (name === './snapshots' || name === './markers') { return loadWithVscode(nodeRequire.resolve(name), vscode, cache); }
+    if (name === './snapshots' || name === './markers' || name === './decorations') { return loadWithVscode(nodeRequire.resolve(name), vscode, cache); }
     return nodeRequire(name);
   };
   const source = fs.readFileSync(filename, 'utf8');
@@ -72,12 +72,16 @@ async function harness(t, repositories = [], options = {}) {
   const errors = [];
   const opened = new EventEmitter();
   const closed = new EventEmitter();
+  const textChanged = new EventEmitter();
+  const textOpened = new EventEmitter();
+  const textClosed = new EventEmitter();
+  const textDocuments = [];
   const api = {
     git: { path: 'git' }, repositories,
     onDidOpenRepository: opened.event, onDidCloseRepository: closed.event,
   };
   let view;
-  let decorations;
+  const decorationProviders = [];
   let pick = () => undefined;
   const vscode = {
     Disposable, EventEmitter, Uri,
@@ -96,7 +100,11 @@ async function harness(t, repositories = [], options = {}) {
       getExtension: () => ({ activate: async () => ({ enabled: true, getAPI: () => api }) }),
     },
     workspace: {
-      fs: { stat: async (uri) => fs.promises.stat(uri.fsPath) },
+      fs: { stat: async (uri) => fs.promises.stat(uri.fsPath), readFile: async (uri) => fs.promises.readFile(uri.fsPath) },
+      textDocuments,
+      onDidChangeTextDocument: textChanged.event,
+      onDidOpenTextDocument: textOpened.event,
+      onDidCloseTextDocument: textClosed.event,
       getConfiguration: () => ({ get: (_name, fallback) => options.defaultBranch ?? fallback }),
       onDidChangeConfiguration: new EventEmitter().event,
       registerFileSystemProvider: (scheme, provider, settings) => {
@@ -110,7 +118,10 @@ async function harness(t, repositories = [], options = {}) {
         view = { provider: treeDataProvider, onDidChangeVisibility: new EventEmitter().event, dispose: () => {} };
         return view;
       },
-      registerFileDecorationProvider: (provider) => { decorations = provider; return new Disposable(); },
+      registerFileDecorationProvider: (provider) => {
+        decorationProviders.push(provider);
+        return new Disposable(() => decorationProviders.splice(decorationProviders.indexOf(provider), 1));
+      },
       showQuickPick: async (choices) => pick(choices),
       showInformationMessage: async (message) => calls.push(['information', message]),
       showErrorMessage: async (message) => errors.push(message),
@@ -149,8 +160,10 @@ async function harness(t, repositories = [], options = {}) {
   t.after(() => context.subscriptions.forEach((item) => item.dispose()));
   await commands.get('branchDiff.refresh')();
   return {
-    view, api, opened, closed, decorations, commands, providers, calls, errors, state, contexts,
+    view, api, opened, closed, commands, providers, calls, errors, state, contexts,
+    decorations: decorationProviders[0], explorerDecorations: decorationProviders[1], decorationProviders,
     sourceControls,
+    textDocuments, textChanged, textOpened, textClosed,
     marker: () => sourceControls.findLast((control) => !control.disposed),
     select: (fn) => { pick = fn; },
     sections: () => view.provider.getChildren(),
@@ -256,6 +269,206 @@ test('opens working files, deleted snapshots, and committed diffs including empt
   assert.deepEqual(h.errors, []);
 });
 
+function explorerDecoration(h, repo, filePath) {
+  return h.explorerDecorations.provideFileDecoration(Uri.file(path.join(repo.root, filePath)));
+}
+
+test('colors committed branch changes like the sidebar without adding Explorer badges', async (t) => {
+  const repo = fixture(t);
+  repo.write('modified.txt', 'before\n');
+  repo.write('unchanged.txt', 'unchanged\n');
+  repo.write('staged.txt', 'before\n');
+  repo.write('old name.txt', 'content retained across rename\n');
+  repo.write('binary.bin', Buffer.from([0, 255, 10]));
+  repo.commit('base');
+  repo.git('checkout', '-b', 'feature');
+  repo.write('modified.txt', 'after\n');
+  repo.write('nested/[new] ü.txt', 'added\n');
+  repo.write('binary.bin', Buffer.from([0, 254, 10]));
+  repo.git('mv', 'old name.txt', 'new name.txt');
+  repo.commit('feature');
+  repo.write('unchanged.txt', 'local only\n');
+  repo.write('staged.txt', 'staged only\n');
+  repo.git('add', 'staged.txt');
+  repo.write('untracked.txt', 'untracked\n');
+  const h = await harness(t, [repository(repo)]);
+  for (const [file, color] of [
+    ['modified.txt', 'gitDecoration.modifiedResourceForeground'],
+    ['nested/[new] ü.txt', 'gitDecoration.addedResourceForeground'],
+    ['new name.txt', 'gitDecoration.renamedResourceForeground'],
+    ['binary.bin', 'gitDecoration.modifiedResourceForeground'],
+  ]) {
+    const decoration = explorerDecoration(h, repo, file);
+    assert.equal(decoration.color.id, color, file);
+    const item = h.children(h.sections()[0]).find((item) => item.change?.path === file);
+    assert.equal(decoration.color.id, h.decorations.provideFileDecoration(item.resourceUri).color.id);
+    assert.equal(decoration.badge, undefined, 'Branch coloring must not introduce a Git status badge');
+    assert.equal(decoration.propagate, undefined, 'Only changed files, not their parent directories, are colored');
+  }
+  for (const file of ['unchanged.txt', 'staged.txt', 'untracked.txt', 'old name.txt', 'nested', '.git/config', '../outside.txt']) {
+    assert.equal(explorerDecoration(h, repo, file), undefined, file);
+  }
+  for (const scheme of ['branch-diff-status', 'branch-diff-snapshot', 'git', 'untitled']) {
+    assert.equal(h.explorerDecorations.provideFileDecoration(Uri.from({ scheme, path: path.join(repo.root, 'modified.txt') })), undefined);
+  }
+  assert.equal(h.decorations.provideFileDecoration(h.items().find((item) => item.change?.path === 'modified.txt').resourceUri).badge, 'M');
+});
+
+test('matches every committed status color and invalidates Explorer colors when a status changes at the same path', async (t) => {
+  const repo = fixture(t);
+  const h = await harness(t);
+  const colors = {
+    A: 'gitDecoration.addedResourceForeground',
+    M: 'gitDecoration.modifiedResourceForeground',
+    D: 'gitDecoration.deletedResourceForeground',
+    R: 'gitDecoration.renamedResourceForeground',
+    C: 'gitDecoration.addedResourceForeground',
+    T: 'gitDecoration.modifiedResourceForeground',
+  };
+  const baseline = {
+    root: Uri.file(repo.root), baseName: 'main', repositoryRoots: [],
+    changes: Object.keys(colors).map((status) => ({ status, path: `${status}.txt` })),
+  };
+  h.explorerDecorations.update(baseline);
+  for (const [status, color] of Object.entries(colors)) {
+    const decoration = explorerDecoration(h, repo, `${status}.txt`);
+    const sidebar = h.decorations.provideFileDecoration(Uri.from({ scheme: 'branch-diff-status', path: `/${status}.txt`, query: status }));
+    assert.equal(decoration.color.id, color, status);
+    assert.equal(decoration.color.id, sidebar.color.id, status);
+    assert.match(decoration.tooltip, new RegExp(`^${sidebar.tooltip} between`));
+  }
+  const events = [];
+  h.explorerDecorations.onDidChangeFileDecorations(() => events.push(true));
+  h.explorerDecorations.update({
+    ...baseline, changes: baseline.changes.map((change) => change.path === 'A.txt' ? { ...change, status: 'M' } : change),
+  });
+  assert.equal(explorerDecoration(h, repo, 'A.txt').color.id, colors.M);
+  assert.deepEqual(events, [true], 'Changing only the status still invalidates cached decorations');
+});
+
+test('ties Explorer coloring to the remembered marker toggle while leaving sidebar badges unchanged', async (t) => {
+  const repo = fixture(t);
+  repo.write('file.txt', 'before\n'); repo.commit('base');
+  repo.git('checkout', '-b', 'feature');
+  repo.write('file.txt', 'after\n'); repo.commit('feature');
+  const h = await harness(t, [repository(repo)], { state: { markersEnabled: false } });
+  const events = [];
+  h.explorerDecorations.onDidChangeFileDecorations((uris) => events.push(uris));
+  assert.equal(explorerDecoration(h, repo, 'file.txt'), undefined);
+  await h.run('refresh');
+  assert.equal(events.length, 0, 'Refreshing while disabled does not repaint decorations');
+  for (const [command, enabled] of [['enableMarkers', true], ['toggleMarkers', false], ['toggleMarkers', true], ['disableMarkers', false]]) {
+    await h.run(command);
+    assert.equal(!!explorerDecoration(h, repo, 'file.txt'), enabled, command);
+    assert.equal(h.decorations.provideFileDecoration(h.items()[0].resourceUri).badge, 'M');
+  }
+  assert.deepEqual(events, [undefined, undefined, undefined, undefined], 'Each state change invalidates cached file decorations');
+  await h.run('disableMarkers');
+  assert.equal(events.length, 4, 'Idempotent marker commands do not repaint decorations');
+  assert.equal(h.decorationProviders.length, 2, 'Toggling reuses the registered provider');
+});
+
+test('refreshes Explorer coloring on commits, comparison ref updates, and missing branches', async (t) => {
+  const repo = fixture(t);
+  repo.write('file.txt', 'before\n'); repo.commit('base');
+  repo.git('checkout', '-b', 'feature');
+  const tracked = repository(repo);
+  const h = await harness(t, [tracked]);
+  const events = [];
+  h.explorerDecorations.onDidChangeFileDecorations(() => events.push(true));
+  repo.write('file.txt', 'after\n');
+  const head = repo.commit('feature');
+  await nextRefresh(h, () => tracked.changed.fire());
+  assert.ok(explorerDecoration(h, repo, 'file.txt'));
+  assert.equal(events.length, 1);
+  await h.run('refresh');
+  assert.equal(events.length, 1, 'Unchanged comparisons do not repaint decorations');
+  repo.git('update-ref', 'refs/heads/main', head);
+  await h.run('refresh');
+  assert.equal(explorerDecoration(h, repo, 'file.txt'), undefined);
+  repo.write('another.txt', 'new\n'); repo.commit('another');
+  await h.run('refresh');
+  assert.ok(explorerDecoration(h, repo, 'another.txt'));
+  repo.git('branch', '-D', 'main');
+  await h.run('refresh');
+  assert.equal(explorerDecoration(h, repo, 'another.txt'), undefined);
+  h.select((choices) => choices.find((choice) => choice.branch.name === 'feature'));
+  await h.run('selectBranch');
+  assert.equal(explorerDecoration(h, repo, 'another.txt'), undefined);
+});
+
+test('scopes Explorer coloring to the selected repository and excludes nested repository roots and files', async (t) => {
+  const one = fixture(t);
+  const two = fixture(t);
+  for (const repo of [one, two]) {
+    repo.write('own.txt', 'before\n'); repo.commit('base');
+    repo.git('checkout', '-b', 'feature');
+    repo.write('own.txt', 'after\n');
+    repo.write('nested/file.txt', 'nested\n');
+    repo.write('nested-sibling/file.txt', 'own\n');
+    repo.write('nested-root', 'covered by a nested repository root\n');
+    repo.commit('feature');
+  }
+  const first = repository(one);
+  const second = repository(two);
+  const nested = ['nested', 'nested-root'].map((name) => ({
+    rootUri: Uri.file(path.join(one.root, name)), state: { HEAD: undefined, onDidChange: new EventEmitter().event },
+  }));
+  const h = await harness(t, [first, second, ...nested]);
+  assert.ok(explorerDecoration(h, one, 'own.txt'));
+  assert.ok(explorerDecoration(h, one, 'nested-sibling/file.txt'));
+  assert.equal(explorerDecoration(h, one, 'nested/file.txt'), undefined);
+  assert.equal(explorerDecoration(h, one, 'nested-root'), undefined);
+  assert.equal(explorerDecoration(h, two, 'own.txt'), undefined);
+  await nextRefresh(h, () => {
+    h.api.repositories = [first, second];
+    h.closed.fire(nested[0]);
+  });
+  assert.ok(explorerDecoration(h, one, 'nested/file.txt'), 'Closing a nested repository updates exclusions');
+  h.select((choices) => choices.find((choice) => choice.repository === second));
+  await h.run('selectRepository');
+  assert.equal(explorerDecoration(h, one, 'own.txt'), undefined);
+  assert.ok(explorerDecoration(h, two, 'own.txt'));
+  await nextRefresh(h, () => { h.api.repositories = []; h.closed.fire(second); });
+  assert.equal(explorerDecoration(h, two, 'own.txt'), undefined);
+});
+
+test('clears old Explorer coloring while switching branches and discards stale comparison results', async (t) => {
+  const repo = fixture(t);
+  repo.write('file.txt', 'before\n'); repo.commit('base');
+  repo.git('checkout', '-b', 'feature');
+  repo.write('file.txt', 'after\n'); repo.commit('feature');
+  const h = await harness(t, [repository(repo)]);
+  const { Git } = require('../dist/git');
+  const compare = Git.prototype.compare;
+  let release;
+  let started;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const queried = new Promise((resolve) => { started = resolve; });
+  t.after(() => release());
+  t.mock.method(Git.prototype, 'compare', async function (root, base) {
+    const comparison = await compare.call(this, root, base);
+    if (base === 'refs/heads/feature') {
+      started();
+      await gate;
+    }
+    return comparison;
+  });
+  h.select((choices) => choices.find((choice) => choice.branch.name === 'feature'));
+  const pending = h.run('selectBranch');
+  await queried;
+  assert.equal(explorerDecoration(h, repo, 'file.txt'), undefined, 'Old comparison coloring clears before the new query completes');
+  h.select((choices) => choices.find((choice) => choice.branch.name === 'main'));
+  await h.run('selectBranch');
+  assert.ok(explorerDecoration(h, repo, 'file.txt'));
+  await h.run('disableMarkers');
+  release();
+  await pending;
+  assert.equal(explorerDecoration(h, repo, 'file.txt'), undefined, 'Pending refreshes cannot re-enable coloring');
+  await h.run('enableMarkers');
+  assert.ok(explorerDecoration(h, repo, 'file.txt'), 'Stale branch results cannot overwrite the selected comparison');
+});
+
 test('uses a HEAD snapshot when a committed file is missing from the working tree', async (t) => {
   const repo = fixture(t);
   repo.write('file.txt', 'before\n');
@@ -350,6 +563,167 @@ test('uses empty baselines for added files and the original path for renames', a
   const renamed = JSON.parse((await original(h, repo, 'new name.txt')).query);
   assert.equal(renamed.path, 'old name.txt');
   assert.equal(renamed.empty, false);
+});
+
+test('synthesizes native marker baselines without changing historical sidebar snapshots', async (t) => {
+  const repo = fixture(t);
+  repo.write('file.txt', 'first\nbefore\nlast\n');
+  repo.commit('base');
+  repo.git('checkout', '-b', 'feature');
+  repo.write('file.txt', 'first\nafter\nlast\n');
+  repo.commit('feature');
+  repo.write('file.txt', 'first\nafter\nlocal addition\nlast\n');
+  const h = await harness(t, [repository(repo)]);
+  const marker = h.marker();
+  const uri = await original(h, repo, 'file.txt');
+  const snapshots = h.providers.get(uri.scheme).provider;
+  const read = async () => Buffer.from(await snapshots.readFile(uri)).toString();
+  assert.equal(await read(), 'first\nbefore\nlocal addition\nlast\n');
+
+  await h.run('openDiff', h.children(h.sections()[0])[0]);
+  const [, historical, head] = h.calls.at(-1);
+  assert.equal(Buffer.from(await snapshots.readFile(historical)).toString(), 'first\nbefore\nlast\n');
+  assert.equal(Buffer.from(await snapshots.readFile(head)).toString(), 'first\nafter\nlast\n');
+
+  const events = [];
+  snapshots.onDidChangeFile((changes) => events.push(...changes));
+  const mtime = (await snapshots.stat(uri)).mtime;
+  let text = 'first\nafter\nunsaved addition\nlast\n';
+  const document = { uri: Uri.file(path.join(repo.root, 'file.txt')), getText: () => text };
+  h.textDocuments.push(document);
+  h.textOpened.fire(document);
+  h.textChanged.fire({ document });
+  assert.ok(events.some((event) => event.uri.toString() === uri.toString()));
+  assert.ok(events.every((event) => event.uri.toString() !== historical.toString()));
+  assert.ok((await snapshots.stat(uri)).mtime > mtime);
+  assert.equal(await read(), 'first\nbefore\nunsaved addition\nlast\n');
+
+  text = 'first\nafter\nlast\n';
+  h.textChanged.fire({ document });
+  assert.equal(await read(), 'first\nbefore\nlast\n', 'Undo restores the unadjusted baseline');
+  h.textDocuments.pop();
+  h.textClosed.fire(document);
+  assert.equal(await read(), 'first\nbefore\nlocal addition\nlast\n', 'Closing reloads saved disk contents');
+
+  repo.git('add', 'file.txt');
+  await h.run('refresh');
+  assert.equal(h.marker(), marker, 'Staging does not recreate the provider');
+  assert.equal(await read(), 'first\nbefore\nlast\n', 'Staged additions become branch markers again');
+  repo.git('reset', '--', 'file.txt');
+  await h.run('refresh');
+  assert.equal(await read(), 'first\nbefore\nlocal addition\nlast\n');
+});
+
+test('synthesizes renamed and added files using their current index paths', async (t) => {
+  const repo = fixture(t);
+  repo.write('old.txt', 'first\nbefore\nlast\n');
+  repo.commit('base');
+  repo.git('checkout', '-b', 'feature');
+  repo.git('mv', 'old.txt', 'new.txt');
+  repo.write('new.txt', 'first\nafter\nlast\n');
+  repo.write('added.txt', 'committed addition\n');
+  repo.commit('feature');
+  repo.write('new.txt', 'first\nafter\nlocal\nlast\n');
+  repo.write('added.txt', 'committed addition\nlocal\n');
+  const h = await harness(t, [repository(repo)]);
+  const snapshots = h.providers.get('branch-diff-snapshot').provider;
+  const renamed = await original(h, repo, 'new.txt');
+  assert.equal(JSON.parse(renamed.query).path, 'old.txt');
+  assert.equal(JSON.parse(renamed.query).markerPath, 'new.txt');
+  assert.equal(Buffer.from(await snapshots.readFile(renamed)).toString(), 'first\nbefore\nlocal\nlast\n');
+  assert.equal(Buffer.from(await snapshots.readFile(await original(h, repo, 'added.txt'))).toString(), 'local\n');
+});
+
+test('retains branch additions when appending saved and unsaved lines to an unterminated new file (case 9)', async (t) => {
+  const repo = fixture(t);
+  repo.write('existing.txt', 'base\n');
+  const base = repo.commit('base');
+  repo.git('checkout', '-b', 'feature');
+  repo.write('added.txt', 'committed addition');
+  repo.commit('feature');
+  const h = await harness(t, [repository(repo)]);
+  const uri = await original(h, repo, 'added.txt');
+  const snapshots = h.providers.get(uri.scheme).provider;
+  const read = async () => Buffer.from(await snapshots.readFile(uri)).toString();
+  assert.equal(await read(), '');
+
+  const document = { uri: Uri.file(path.join(repo.root, 'added.txt')), getText: () => 'committed addition\nlocal addition' };
+  h.textDocuments.push(document);
+  h.textChanged.fire({ document });
+  assert.equal(await read(), 'local addition', 'Only the local line enters the synthetic baseline');
+  repo.write('added.txt', document.getText());
+  h.textDocuments.pop();
+  h.textClosed.fire(document);
+  await h.run('refresh');
+  assert.equal(await read(), 'local addition', 'Saving keeps the committed addition separate');
+
+  repo.git('add', 'added.txt');
+  await h.run('refresh');
+  assert.equal(await read(), '', 'Staging makes both lines branch additions');
+  await h.run('openDiff', h.children(h.sections()[0]).find((item) => item.change.path === 'added.txt'));
+  const [, historical] = h.calls.at(-1);
+  assert.equal(JSON.parse(historical.query).commit, base);
+  assert.equal((await snapshots.readFile(historical)).byteLength, 0,
+    'The historical empty snapshot stays exact');
+});
+
+test('leaves untracked files to native Git and preserves raw binary marker baselines', async (t) => {
+  const repo = fixture(t);
+  const bytes = Buffer.from([0, 255, 128, 10, 42]);
+  repo.write('binary.bin', bytes);
+  repo.commit('base');
+  repo.write('binary.bin', Buffer.from([0, 1, 2, 3]));
+  repo.write('[untracked].txt', 'local only\n');
+  const h = await harness(t, [repository(repo)]);
+  const snapshots = h.providers.get('branch-diff-snapshot').provider;
+  assert.equal(Buffer.from(await snapshots.readFile(await original(h, repo, '[untracked].txt'))).toString(), 'local only\n');
+  assert.deepEqual(Buffer.from(await snapshots.readFile(await original(h, repo, 'binary.bin'))), bytes);
+});
+
+test('caches marker Git inputs across typing but invalidates in-flight inputs on repository refresh', async (t) => {
+  const repo = fixture(t);
+  repo.write('file.txt', 'before\nlast\n');
+  repo.commit('base');
+  repo.git('checkout', '-b', 'feature');
+  repo.write('file.txt', 'after\nlast\n');
+  repo.commit('feature');
+  repo.write('file.txt', 'after\nlocal\nlast\n');
+  const h = await harness(t, [repository(repo)]);
+  const uri = await original(h, repo, 'file.txt');
+  const snapshots = h.providers.get(uri.scheme).provider;
+  const { Git } = require('../dist/git');
+  const readIndexBaseline = Git.prototype.readIndexBaseline;
+  let release;
+  let started;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const queried = new Promise((resolve) => { started = resolve; });
+  t.after(() => release());
+  let queries = 0;
+  t.mock.method(Git.prototype, 'readIndexBaseline', async function (...args) {
+    const bytes = await readIndexBaseline.apply(this, args);
+    if (++queries === 1) {
+      started();
+      await gate;
+    }
+    return bytes;
+  });
+  const pending = snapshots.readFile(uri);
+  await queried;
+  repo.git('add', 'file.txt');
+  await h.run('refresh');
+  release();
+  assert.equal(Buffer.from(await pending).toString(), 'before\nlast\n', 'A stale index read cannot restore the old synthetic baseline');
+  assert.equal(queries, 2);
+
+  let text = 'after\nlocal\nunsaved\nlast\n';
+  const document = { uri: Uri.file(path.join(repo.root, 'file.txt')), getText: () => text };
+  h.textDocuments.push(document);
+  h.textChanged.fire({ document });
+  assert.equal(Buffer.from(await snapshots.readFile(uri)).toString(), 'before\nunsaved\nlast\n');
+  text = 'after\nlocal\nmore unsaved\nlast\n';
+  h.textChanged.fire({ document });
+  assert.equal(Buffer.from(await snapshots.readFile(uri)).toString(), 'before\nmore unsaved\nlast\n');
+  assert.equal(queries, 2, 'Typing reuses the cached raw index and branch contents');
 });
 
 test('supports local edits in otherwise unchanged files without changing the committed sidebar', async (t) => {

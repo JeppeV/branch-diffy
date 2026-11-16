@@ -182,6 +182,23 @@ test('reads raw index bytes with text conversion disabled and literal unusual pa
   repo.write('file.txt', 'unstaged\n');
   assert.deepEqual(await client.readIndexFile(repo.root, '[literal] image.bin'), bytes);
   assert.equal((await client.readIndexFile(repo.root, 'file.txt')).toString(), 'staged\n');
+  assert.deepEqual(await client.readIndexBaseline(repo.root, '[literal] image.bin'), bytes);
+  assert.equal(await client.readIndexBaseline(repo.root, 'not tracked.txt'), undefined);
+  assert.equal(await client.readIndexBaseline(repo.root, 'literal*'), undefined);
+});
+
+test('uses the ours index stage for marker baselines during conflicts', async (t) => {
+  const repo = fixture(t);
+  repo.write('file.txt', 'base\n');
+  repo.commit('base');
+  repo.git('checkout', '-b', 'feature');
+  repo.write('file.txt', 'feature\n');
+  repo.commit('feature');
+  repo.git('checkout', 'main');
+  repo.write('file.txt', 'ours\n');
+  repo.commit('ours');
+  assert.throws(() => repo.git('merge', 'feature'));
+  assert.equal((await client.readIndexBaseline(repo.root, 'file.txt')).toString(), 'ours\n');
 });
 
 test('does not treat embedded repository directories as untracked files', async (t) => {

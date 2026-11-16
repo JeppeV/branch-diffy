@@ -209,4 +209,20 @@ export class Git {
   readIndexFile(root: string, filePath: string, stage: 0 | 2 = 0): Promise<Buffer> {
     return this.run(root, ['show', '--no-ext-diff', '--no-textconv', `:${stage}:${filePath}`]);
   }
+
+  /** Missing index entries are normal for untracked files and staged deletions. */
+  async readIndexBaseline(root: string, filePath: string): Promise<Buffer | undefined> {
+    const output = await this.run(root, ['--literal-pathspecs', 'ls-files', '--stage', '-z', '--', filePath]);
+    for (const entry of output.toString('utf8').split('\0')) {
+      const tab = entry.indexOf('\t');
+      if (tab < 0 || entry.slice(tab + 1) !== filePath) {
+        continue;
+      }
+      const [mode, , stage] = entry.slice(0, tab).split(' ');
+      if (mode !== '160000' && (stage === '0' || stage === '2')) {
+        return this.readIndexFile(root, filePath, stage === '2' ? 2 : 0);
+      }
+    }
+    return undefined;
+  }
 }

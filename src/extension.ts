@@ -1,22 +1,14 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
+import { BranchFileDecorations } from './decorations';
 import { branchLabel, Change, Git, MissingReferenceError, UnstagedChange } from './git';
 import { GitApi, GitExtension, Repository } from './gitApi';
 import { BranchMarkers } from './markers';
 import { indexSnapshotUri, SnapshotFileSystem, snapshotScheme, snapshotUri } from './snapshots';
+import { statusInfo } from './status';
 
 type Section = 'committed' | 'unstaged';
 
-const statusInfo: Record<UnstagedChange['status'], { label: string; color: string }> = {
-  A: { label: 'Added', color: 'gitDecoration.addedResourceForeground' },
-  M: { label: 'Modified', color: 'gitDecoration.modifiedResourceForeground' },
-  D: { label: 'Deleted', color: 'gitDecoration.deletedResourceForeground' },
-  R: { label: 'Renamed', color: 'gitDecoration.renamedResourceForeground' },
-  C: { label: 'Copied', color: 'gitDecoration.addedResourceForeground' },
-  T: { label: 'Type changed', color: 'gitDecoration.modifiedResourceForeground' },
-  U: { label: 'Untracked', color: 'gitDecoration.untrackedResourceForeground' },
-  '!': { label: 'Conflicted', color: 'gitDecoration.conflictingResourceForeground' },
-};
 const statusScheme = 'branch-diff-status';
 
 class ChangeItem extends vscode.TreeItem {
@@ -74,6 +66,7 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
   private readonly repositoryListeners = new Map<Repository, vscode.Disposable>();
   private readonly view: vscode.TreeView<Item>;
   private readonly markers: BranchMarkers;
+  private readonly explorerDecorations: BranchFileDecorations;
   private repository: Repository | undefined;
   private items: Item[] = [new MessageItem('Loading repositories…')];
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -89,10 +82,12 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
   ) {
     this.view = vscode.window.createTreeView('branchDiff.files', { treeDataProvider: this, showCollapseAll: false });
     this.markers = new BranchMarkers(git, output, context.workspaceState.get<boolean>('markersEnabled') ?? true);
+    this.explorerDecorations = new BranchFileDecorations(this.markers.enabled);
     void vscode.commands.executeCommand('setContext', 'branchDiff.markersEnabled', this.markers.enabled);
     this.disposables.push(
       this.view,
       this.markers,
+      this.explorerDecorations,
       this.changed,
       api.onDidOpenRepository(() => this.repositoriesChanged()),
       api.onDidCloseRepository(() => this.repositoriesChanged()),
@@ -188,6 +183,7 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
     const repository = this.repository;
     if (!repository) {
       this.markers.update(undefined);
+      this.explorerDecorations.update(undefined);
       this.view.description = undefined;
       this.view.message = 'Open a folder containing a Git repository to compare branches.';
       this.view.badge = undefined;
@@ -198,6 +194,7 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
     const base = this.baseBranch(repository);
     const baseName = branchLabel(base);
     this.markers.prepare(repository.rootUri, baseName);
+    this.explorerDecorations.prepare(repository.rootUri, baseName);
     const head = repository.state.HEAD;
     const headName = head?.name ?? head?.commit?.slice(0, 8) ?? 'HEAD';
     this.view.description = `${baseName} → ${headName}`;
@@ -211,13 +208,15 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
         return;
       }
       this.snapshots.refreshIndex(repository.rootUri);
-      this.markers.update({
+      const baseline = {
         root: repository.rootUri,
         baseCommit: comparison.baseCommit,
         baseName,
         changes: comparison.changes,
         repositoryRoots: this.api.repositories.map((repo) => repo.rootUri),
-      });
+      };
+      this.markers.update(baseline);
+      this.explorerDecorations.update(baseline);
       const committedItems = comparison.changes.map((change) => new ChangeItem(
         change, repository.rootUri, comparison.baseCommit, comparison.headCommit, baseName, headName,
       ));
@@ -245,6 +244,7 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
       }
       this.view.badge = undefined;
       this.markers.update(undefined);
+      this.explorerDecorations.update(undefined);
       if (error instanceof MissingReferenceError) {
         const noHead = error.reference === 'HEAD';
         this.setItems([new MessageItem(
@@ -262,6 +262,7 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
 
   private async setMarkersEnabled(enabled: boolean): Promise<void> {
     this.markers.setEnabled(enabled);
+    this.explorerDecorations.setEnabled(enabled);
     await vscode.commands.executeCommand('setContext', 'branchDiff.markersEnabled', enabled);
     await this.context.workspaceState.update('markersEnabled', enabled);
   }

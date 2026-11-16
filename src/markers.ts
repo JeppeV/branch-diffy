@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { Change, Git } from './git';
-import { snapshotUri } from './snapshots';
+import { markerSnapshotUri } from './snapshots';
 
 export interface MarkerBaseline {
   readonly root: vscode.Uri;
@@ -109,7 +109,7 @@ export class BranchMarkers implements vscode.Disposable {
 
   private async originalResource(baseline: MarkerBaseline, change: Change | undefined, filePath: string): Promise<vscode.Uri | undefined> {
     if (change?.status === 'A') {
-      return snapshotUri(baseline.root, baseline.baseCommit, filePath, true);
+      return markerSnapshotUri(baseline.root, baseline.baseCommit, filePath, filePath, true);
     }
     const originalPath = change?.originalPath ?? filePath;
     const type = await this.git.fileType(baseline.root.fsPath, baseline.baseCommit, originalPath);
@@ -120,7 +120,7 @@ export class BranchMarkers implements vscode.Disposable {
       return undefined;
     }
     // A file absent on both branch tips can still have new, uncommitted content.
-    return snapshotUri(baseline.root, baseline.baseCommit, originalPath, type === undefined);
+    return markerSnapshotUri(baseline.root, baseline.baseCommit, originalPath, filePath, type === undefined);
   }
 
   dispose(): void {

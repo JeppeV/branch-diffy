@@ -1,8 +1,20 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const net = require('node:net');
 const { runTests } = require('@vscode/test-electron');
 const { fixture } = require('./helpers.cjs');
+
+async function availablePort() {
+  const server = net.createServer();
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const port = server.address().port;
+  await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  return port;
+}
 
 async function main() {
   const cleanup = [];
@@ -18,6 +30,7 @@ async function main() {
     repo.git('checkout', '-b', 'feature');
     repo.write('modified.txt', 'unchanged first\nafter\nunchanged third\nunchanged fourth\n');
     repo.write('added.txt', 'added\n');
+    repo.write('z-added-no-eol.txt', 'added');
     repo.git('rm', 'deleted.txt');
     const head = repo.commit('feature');
     repo.write('local-modified.txt', 'staged local version\n');
@@ -25,15 +38,20 @@ async function main() {
     repo.write('local-modified.txt', 'working local version\n');
     fs.unlinkSync(path.join(repo.root, 'local-deleted.txt'));
     repo.write('untracked.txt', 'untracked\n');
+    const debugPort = await availablePort();
     await runTests({
       version: '1.95.3',
       vscodeExecutablePath: process.env.VSCODE_EXECUTABLE_PATH,
       extensionDevelopmentPath: path.resolve(__dirname, '..'),
       extensionTestsPath: path.join(__dirname, 'vscode-smoke.cjs'),
-      extensionTestsEnv: { BRANCH_DIFF_TEST_ROOT: repo.root, BRANCH_DIFF_TEST_BASE: base, BRANCH_DIFF_TEST_HEAD: head },
+      extensionTestsEnv: {
+        BRANCH_DIFF_TEST_ROOT: repo.root, BRANCH_DIFF_TEST_BASE: base, BRANCH_DIFF_TEST_HEAD: head,
+        BRANCH_DIFF_TEST_NODE: process.execPath, BRANCH_DIFF_TEST_DEBUG_PORT: String(debugPort),
+      },
       launchArgs: [
         repo.root, '--disable-extensions', '--disable-gpu', '--disable-workspace-trust',
         '--skip-welcome', '--skip-release-notes',
+        `--remote-debugging-port=${debugPort}`,
         '--user-data-dir', path.join(data, 'user'), '--extensions-dir', path.join(data, 'extensions'),
       ],
     });
