@@ -2,6 +2,13 @@
 
 A VS Code sidebar for files changed between your checked-out branch and another branch, defaulting to `main`.
 
+## Requirements
+
+- VS Code 1.95 or newer with its built-in Git extension enabled.
+- Git available to VS Code and a trusted workspace containing a Git repository.
+
+Supports local folders and remote extension hosts (WSL, SSH, and Dev Containers), but not virtual workspaces or VS Code for the Web. Node.js is only needed for development, not to use the extension.
+
 ## Use
 
 1. Open a Git repository and select **Branch Diff** in the left Activity Bar.
@@ -14,15 +21,15 @@ The view refreshes when Git reports repository changes, when it becomes visible,
 
 ### Native editor markers
 
-Opening Branch Diff enables native, theme-aware gutter markers for the selected repository: green for added lines, blue for modified lines, and red for deleted lines. Click a marker to see VS Code's inline change preview. Renamed files compare against their original path on the comparison branch.
+Branch Diff starts automatically after VS Code finishes starting, without needing to open its sidebar, and enables native, theme-aware gutter markers for the selected repository: green for added lines, blue for modified lines, and red for deleted lines. Click a marker to see VS Code's inline change preview. Renamed files compare against their original path on the comparison branch.
 
 Branch markers show changes from the selected branch to the **index**, mapped into the live editor. Unstaged and unsaved edits are incorporated into a synthetic, read-only branch baseline so the built-in Git provider can mark those edits normally. For example, a committed modification followed by an unstaged added line keeps a blue branch marker on the modification and Git's green marker on the addition. Local edits take precedence on overlapping lines; an independent branch edit sharing a local deletion's gutter anchor remains accessible through the inline preview's comparison dropdown. Staged changes remain part of the branch comparison. This does not modify files, commits, or the index.
 
 The branch marker's inline preview uses this **adjusted baseline**, not necessarily the exact comparison-branch contents. The **Committed changes** section and its **Open Diff** action remain committed-only and unadjusted; the separate **Unstaged changes** section shows local changes relative to the index. Entirely deleted files are still viewed through the sidebar or **Open Diff**, since they have no working-copy editor to mark. Very large or expensive text comparisons yield to native Git markers for that file; binary baselines remain byte-preserving.
 
-The view-title button shows an **open eye when markers are on** and a **crossed-out eye when off**. Hover it to see the current state and whether clicking will enable or disable markers. The Command Palette likewise shows **Branch Diff: Disable Branch Markers (Currently On)** or **Branch Diff: Enable Branch Markers (Currently Off)**. Markers are on by default; the toggle is remembered for this workspace. Switching branches or repositories updates the baseline automatically. The `branchDiff.toggleMarkers` command remains available for custom keybindings.
+The status bar shows **Branch Diff: On** with an open eye or **Branch Diff: Off** with a crossed-out eye. Click it to toggle markers, even when the Branch Diff sidebar is closed. The view-title button uses the same eye icons; hover either control to see the current state and what clicking will do. The Command Palette likewise shows **Branch Diff: Disable Branch Markers (Currently On)** or **Branch Diff: Enable Branch Markers (Currently Off)**. Markers are on by default; the toggle is remembered for this workspace. Switching branches or repositories updates the baseline automatically. The `branchDiff.toggleMarkers` command remains available for custom keybindings.
 
-While branch markers are enabled, files in the selected repository's **Committed changes** section also use the sidebar's theme-aware status colors in Explorer: added/copied, modified/type-changed, deleted, and renamed files each use their corresponding Git color. Turning markers off removes this branch coloring without changing the sidebar's status badges or native Git decorations. Local-only changes and files belonging to nested repositories are not branch-colored.
+While branch markers are enabled, files in the selected repository's **Committed changes** section also show Git-style status letters (such as **M** for modified) and theme-aware status colors in Explorer. These decorations propagate to parent folders using VS Code's native Git-style folder highlighting and change indicators, except for deletions, which do not decorate parent folders. Turning markers off removes the branch colors, badges, and folder indicators without changing the sidebar's status badges or native Git decorations. Local-only changes and files belonging to nested repositories are not branch-decorated.
 
 Native integration adds a separate **Branch Diff (branch-name)** provider in Source Control, with its commit input hidden. It does not replace the built-in Git provider, change Git settings, or inflate the Source Control change count. If a change preview offers multiple baselines, choose **Branch Diff (branch-name)** for the branch comparison. Markers follow VS Code's `scm.diffDecorations` setting; use `all` or `gutter` to show them beside line numbers. VS Code may suppress gutter marks for entirely new untracked files with empty baselines.
 
@@ -46,18 +53,25 @@ Remote branches use already-fetched local references; the extension never fetche
 
 This controls the initial branch for repositories without a remembered selection. Use the branch picker to change an existing selection.
 
+### Known limitations
+
+On VS Code 1.95.3, the native diff engine displays committed new files with blue **modified** gutter markers instead of green **added** markers. Their sidebar and Explorer status remains **A**, and their committed diff correctly has an empty baseline. This is a native quick-diff limitation; the extension does not replace VS Code's marker renderer.
+
 ## Develop
 
-Requires Node.js 22+, Git, and VS Code 1.95+. The built-in VS Code Git extension must be enabled and the workspace trusted. Works with local folders and remote extension hosts (for example WSL, SSH, and Dev Containers), but not virtual workspaces or VS Code for the Web.
+Requires Node.js 22+ and Git in addition to the requirements above.
 
 ```sh
-npm install
+npm ci
+npm run check
 npm test
 ```
 
 Open this folder in VS Code and press **F5** to start an Extension Development Host, then open a Git repository there.
 
 `npm run test:vscode` also runs a smoke test in an isolated VS Code window. It downloads VS Code 1.95.3 by default; set `VSCODE_EXECUTABLE_PATH` to use an existing VS Code executable instead. Unit/integration tests in `npm test` use real temporary Git repositories and a mocked VS Code UI.
+
+On Windows PowerShell, use `npm.cmd` instead of `npm` if script execution is restricted. VS Code API types are pinned to 1.95.0 to catch accidental use of newer APIs; keep the real-editor smoke test as the runtime compatibility check.
 
 ## Install locally
 

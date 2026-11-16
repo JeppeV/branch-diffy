@@ -1,8 +1,13 @@
 .vscode/**
 .vscode-test/**
+.github/**
+docs/**
 src/**
 test/**
 node_modules/**
+AGENTS.md
+BUG_TRACKER.md
+FEATURE_WISHLIST.md
 tsconfig.json
 package-lock.json
 **/*.map

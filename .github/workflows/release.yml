@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: Create a draft release for review before publishing
+        type: boolean
+        default: true
+      prerelease:
+        description: Mark this GitHub release as a prerelease
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.metadata.outputs.tag }}
+      title: ${{ steps.metadata.outputs.title }}
+      asset: ${{ steps.metadata.outputs.asset }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Prepare version and changelog notes
+        id: metadata
+        run: node .github/scripts/release-metadata.cjs "$RUNNER_TEMP/branch-diff-release"
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - name: Test native integration on VS Code 1.95.3
+        run: xvfb-run -a npm run test:vscode
+      - name: Build VSIX
+        env:
+          RELEASE_ASSET: ${{ steps.metadata.outputs.asset }}
+        run: npm run package -- --out "$RUNNER_TEMP/branch-diff-release/$RELEASE_ASSET"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: github-release
+          path: ${{ runner.temp }}/branch-diff-release/
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: github-release
+          path: release
+      - name: Create GitHub release and attach VSIX
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_TITLE: ${{ needs.build.outputs.title }}
+          RELEASE_ASSET: ${{ needs.build.outputs.asset }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_DRAFT: ${{ inputs.draft }}
+          RELEASE_PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          # Never reuse an existing tag that might point at a different commit.
+          existing_tag="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$RELEASE_TAG" \
+            --jq ".[] | select(.ref == \"refs/tags/$RELEASE_TAG\") | .ref")"
+          if [[ -n "$existing_tag" ]]; then
+            echo "::error::Tag $RELEASE_TAG already exists. Commit a new version and changelog entry before releasing."
+            exit 1
+          fi
+
+          flags=()
+          if [[ "$RELEASE_DRAFT" == "true" ]]; then flags+=(--draft); fi
+          if [[ "$RELEASE_PRERELEASE" == "true" ]]; then flags+=(--prerelease); fi
+
+          release_url="$(gh release create "$RELEASE_TAG" "release/$RELEASE_ASSET" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$RELEASE_SHA" \
+            --title "$RELEASE_TITLE" \
+            --notes-file release/release-notes.md \
+            "${flags[@]}")"
+          printf 'Created GitHub release: %s\n' "$release_url" >> "$GITHUB_STEP_SUMMARY"

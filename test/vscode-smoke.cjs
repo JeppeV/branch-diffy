@@ -3,6 +3,7 @@ const { execFile, execFileSync } = require('node:child_process');
 const path = require('node:path');
 const { promisify } = require('node:util');
 const vscode = require('vscode');
+const manifest = require('../package.json');
 const { indexSnapshotUri, snapshotUri } = require('../dist/snapshots');
 
 async function workbench(expression) {
@@ -29,9 +30,25 @@ async function run() {
   const root = vscode.Uri.file(process.env.BRANCH_DIFF_TEST_ROOT);
   const git = (await vscode.extensions.getExtension('vscode.git').activate()).getAPI(1);
   await waitFor(() => git.repositories.some((repo) => repo.state.HEAD?.name === 'feature'), 'Git discovers the test repository');
-  const extension = vscode.extensions.getExtension('branch-diff-local.branch-diff');
+  const extension = vscode.extensions.getExtension(`${manifest.publisher}.${manifest.name}`);
   assert.ok(extension, 'Development extension was discovered');
-  await extension.activate();
+  await waitFor(() => extension.isActive, 'Branch Diff activates after startup without opening its sidebar');
+  const statusShown = (enabled) => workbench(`(() => {
+    const item = [...document.querySelectorAll('.statusbar-item')].find(item => item.textContent.includes('Branch Diff:'));
+    return !!item && item.getClientRects().length > 0
+      && item.textContent.includes(${JSON.stringify(`Branch Diff: ${enabled ? 'On' : 'Off'}`)})
+      && !!item.querySelector(${JSON.stringify(`.codicon-${enabled ? 'eye' : 'eye-closed'}`)});
+  })()`);
+  const clickStatus = () => workbench(`(() => {
+    const item = [...document.querySelectorAll('.statusbar-item')].find(item => item.textContent.includes('Branch Diff:'));
+    item.querySelector('a').click();
+    return true;
+  })()`);
+  await waitFor(() => statusShown(true), 'The status bar shows markers On before the Branch Diff sidebar is opened');
+  await clickStatus();
+  await waitFor(() => statusShown(false), 'Clicking the status bar turns markers Off without opening the sidebar');
+  await clickStatus();
+  await waitFor(() => statusShown(true), 'Clicking again turns markers On');
   await vscode.commands.executeCommand('branchDiff.files.focus');
   await vscode.commands.executeCommand('branchDiff.refresh');
 
@@ -53,16 +70,23 @@ async function run() {
   assert.equal((await vscode.workspace.fs.readFile(empty)).byteLength, 0);
 
   // Check the editor before retrying: a successful check must not queue another file-open command.
-  const selectRow = async (offset, collapseFirst = false) => {
-    await vscode.commands.executeCommand('branchDiff.files.focus');
-    await vscode.commands.executeCommand('list.focusFirst');
-    if (collapseFirst) {
-      await vscode.commands.executeCommand('list.collapse');
-    }
-    for (let index = 0; index < offset; index++) {
-      await vscode.commands.executeCommand('list.focusDown');
-    }
-    await vscode.commands.executeCommand('list.select');
+  const selectRow = async (offset, uri, message, collapseFirst = false) => {
+    await waitFor(async () => {
+      if (vscode.window.activeTextEditor?.document.uri.toString() === uri.toString()) {
+        return true;
+      }
+      // View focus and file opening settle asynchronously, so retry the full interaction.
+      await vscode.commands.executeCommand('branchDiff.files.focus');
+      await vscode.commands.executeCommand('list.focusFirst');
+      if (collapseFirst) {
+        await vscode.commands.executeCommand('list.collapse');
+      }
+      for (let index = 0; index < offset; index++) {
+        await vscode.commands.executeCommand('list.focusDown');
+      }
+      await vscode.commands.executeCommand('list.select');
+      return false;
+    }, message);
   };
 
   // Exercise the actual tree's selection command, rather than calling our open handler directly.
@@ -70,37 +94,21 @@ async function run() {
     [...document.querySelectorAll('.monaco-list-row')].some(row => row.textContent.includes('Committed changes'))
       && [...document.querySelectorAll('.monaco-list-row')].some(row => row.textContent.includes('added.txt'))
   `), 'The committed file tree finishes rendering before selection');
-  await waitFor(async () => {
-    const document = vscode.window.activeTextEditor?.document;
-    if (document?.uri.scheme === 'file' && document.getText() === 'added\n') {
-      return true;
-    }
-    await selectRow(1);
-    return false;
-  }, 'Selecting the first changed file opens the working copy');
-  await selectRow(2);
-  await waitFor(() => {
-    return vscode.window.activeTextEditor?.document.uri.toString() === deleted.toString();
-  }, 'Selecting a deleted file opens its historical snapshot');
+  await selectRow(1, vscode.Uri.joinPath(root, 'added.txt'), 'Selecting the first changed file opens the working copy');
+  assert.equal(vscode.window.activeTextEditor.document.getText(), 'added\n');
+  await selectRow(2, deleted, 'Selecting a deleted file opens its historical snapshot');
   assert.equal(vscode.window.activeTextEditor.document.getText(), 'deleted\n');
 
   // Collapsing committed changes leaves the separate unstaged section accessible.
-  await selectRow(2, true);
   const localDeleted = indexSnapshotUri(root, 'local-deleted.txt');
-  await waitFor(() => vscode.window.activeTextEditor?.document.uri.toString() === localDeleted.toString(),
-    'Selecting an unstaged deletion opens the index version');
+  await selectRow(2, localDeleted, 'Selecting an unstaged deletion opens the index version', true);
   assert.equal(vscode.window.activeTextEditor.document.getText(), 'local deletion baseline\n');
-  await selectRow(3, true);
   const localModified = vscode.Uri.joinPath(root, 'local-modified.txt');
-  await waitFor(() => vscode.window.activeTextEditor?.document.uri.toString() === localModified.toString(),
-    'Selecting an unstaged tracked modification opens the working file');
+  await selectRow(3, localModified, 'Selecting an unstaged tracked modification opens the working file', true);
   assert.equal(vscode.window.activeTextEditor.document.getText(), 'working local version\n');
-  await selectRow(4, true);
-  await waitFor(() => {
-    return vscode.window.activeTextEditor?.document.uri.toString() === vscode.Uri.joinPath(root, 'untracked.txt').toString();
-  }, 'Selecting an untracked file in the unstaged section opens the working copy');
-  assert.equal(vscode.window.activeTextEditor.document.getText(), 'untracked\n');
   const untracked = vscode.Uri.joinPath(root, 'untracked.txt');
+  await selectRow(4, untracked, 'Selecting an untracked file in the unstaged section opens the working copy', true);
+  assert.equal(vscode.window.activeTextEditor.document.getText(), 'untracked\n');
   await vscode.commands.executeCommand('vscode.diff', snapshotUri(root, base, 'untracked.txt', true), untracked, 'Untracked file smoke test');
   await waitFor(() => {
     const input = vscode.window.tabGroups.activeTabGroup.activeTab?.input;
@@ -139,7 +147,8 @@ async function run() {
     'Committed diffs open the historical HEAD snapshot');
   await vscode.commands.executeCommand('workbench.action.closeAllEditors');
 
-  // Verify the rendered Explorer colors, including updates while Branch Diff is hidden.
+  // Verify native Explorer colors, status letters, and inherited folder indicators.
+  await vscode.workspace.getConfiguration('explorer').update('compactFolders', false, vscode.ConfigurationTarget.Global);
   // Select a different row: focused selections override decoration colors in some themes.
   await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.joinPath(root, 'added.txt'));
   const explorerColors = () => workbench(`(() => {
@@ -157,6 +166,41 @@ async function run() {
     probe.remove();
     return colors;
   })()`);
+  const explorerBadges = () => workbench(`(() => {
+    const labels = [...document.querySelectorAll('.explorer-viewlet .label-name')];
+    return Object.fromEntries([
+      'modified.txt', 'z-added-no-eol.txt', 'untracked.txt', 'local-modified.txt',
+      'z-branch-parent', 'z-branch-child', 'branch-nested.txt',
+      'z-native-parent', 'z-native-child', 'native-nested.txt',
+      'z-branch-deletions', 'z-native-deletions',
+    ].map(name => {
+      const label = labels.find(label => label.textContent === name);
+      const iconLabel = label?.closest('.monaco-icon-label');
+      return [name, iconLabel ? {
+        color: getComputedStyle(label).color,
+        badge: getComputedStyle(iconLabel, '::after').content,
+      } : null];
+    }));
+  })()`);
+  await waitFor(async () => {
+    const badges = await explorerBadges();
+    const branch = badges['z-branch-parent'];
+    const native = badges['z-native-parent'];
+    return branch && native && branch.color === native.color
+      && branch.badge === native.badge && !['none', 'normal', '""'].includes(native.badge)
+      && !badges['branch-nested.txt'] && !badges['native-nested.txt'];
+  }, 'Unopened collapsed folders inherit branch colors and change indicators just like native unstaged changes');
+  await waitFor(async () => {
+    const badges = await explorerBadges();
+    const branch = badges['z-branch-deletions'];
+    const native = badges['z-native-deletions'];
+    return branch && native && branch.color === native.color
+      && ['none', 'normal', '""'].includes(branch.badge)
+      && ['none', 'normal', '""'].includes(native.badge);
+  }, 'Folders containing only branch deletions stay undecorated, just like folders with unstaged deletions');
+  await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.joinPath(root, 'z-branch-parent/z-branch-child/branch-nested.txt'));
+  await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.joinPath(root, 'z-native-parent/z-native-child/native-nested.txt'));
+  await vscode.commands.executeCommand('revealInExplorer', vscode.Uri.joinPath(root, 'added.txt'));
   await waitFor(async () => {
     const colors = await explorerColors();
     return colors['modified.txt'] && colors['z-added-no-eol.txt'] && colors['untracked.txt'] && colors['local-modified.txt']
@@ -164,8 +208,23 @@ async function run() {
       && colors['z-added-no-eol.txt'] === colors.added
       && colors['modified.txt'] !== colors['z-added-no-eol.txt'];
   }, 'Committed modified and added files use their corresponding native Git status colors in Explorer');
+  await waitFor(async () => {
+    const badges = await explorerBadges();
+    const native = badges['native-nested.txt'];
+    const folder = badges['z-native-parent'];
+    return native?.badge === '"M"' && badges['modified.txt']?.badge === native.badge
+      && badges['branch-nested.txt']?.badge === native.badge
+      && badges['z-added-no-eol.txt']?.badge === '"A"'
+      && folder && folder.badge !== 'none' && folder.badge !== '""'
+      && ['z-branch-parent', 'z-branch-child', 'z-native-child'].every(name =>
+        badges[name]?.color === folder.color && badges[name]?.badge === folder.badge)
+      && folder.color === native.color;
+  }, 'Branch status letters and both ancestor folder colors/indicators match native unstaged Git decorations');
   const enabledColors = await explorerColors();
-  await vscode.commands.executeCommand('branchDiff.disableMarkers');
+  const enabledBadges = await explorerBadges();
+  await waitFor(() => statusShown(true), 'Marker status remains visible while Explorer replaces the Branch Diff sidebar');
+  await clickStatus();
+  await waitFor(() => statusShown(false), 'The status bar toggles markers Off while Branch Diff is hidden');
   await waitFor(async () => {
     const colors = await explorerColors();
     return colors['modified.txt'] !== enabledColors['modified.txt']
@@ -173,12 +232,24 @@ async function run() {
       && colors['untracked.txt'] === enabledColors['untracked.txt']
       && colors['local-modified.txt'] === enabledColors['local-modified.txt'];
   }, 'Disabling markers removes cached branch coloring but leaves native Git colors intact');
+  await waitFor(async () => {
+    const badges = await explorerBadges();
+    return ['modified.txt', 'z-added-no-eol.txt', 'z-branch-parent', 'z-branch-child', 'branch-nested.txt'].every(name =>
+      badges[name] && badges[name].color !== enabledBadges[name].color
+        && ['none', 'normal', '""'].includes(badges[name].badge))
+      && ['untracked.txt', 'local-modified.txt', 'z-native-parent', 'z-native-child', 'native-nested.txt',
+        'z-branch-deletions', 'z-native-deletions'].every(name =>
+        JSON.stringify(badges[name]) === JSON.stringify(enabledBadges[name]));
+  }, 'Disabling markers clears branch badges and both ancestor decorations without affecting native Git');
   await vscode.commands.executeCommand('branchDiff.enableMarkers');
+  await waitFor(() => statusShown(true), 'The status bar reflects markers enabled through a command');
   await waitFor(async () => {
     const colors = await explorerColors();
     return colors['modified.txt'] === enabledColors['modified.txt']
       && colors['z-added-no-eol.txt'] === enabledColors['z-added-no-eol.txt'];
   }, 'Enabling markers restores Explorer coloring while the Branch Diff sidebar is closed');
+  await waitFor(async () => JSON.stringify(await explorerBadges()) === JSON.stringify(enabledBadges),
+    'Enabling markers restores branch status letters and all inherited folder decorations');
 
   const editor = await vscode.window.showTextDocument(vscode.Uri.joinPath(root, 'modified.txt'));
   const nextChange = async (from, expected) => {
@@ -190,9 +261,11 @@ async function run() {
   };
   // This tracked file is clean relative to HEAD: only our provider exposes the committed change.
   await nextChange(0, 1);
-  await vscode.commands.executeCommand('branchDiff.disableMarkers');
+  await clickStatus();
+  await waitFor(() => statusShown(false), 'Clicking the status bar disables native branch markers in the open editor');
   await nextChange(0, 0);
-  await vscode.commands.executeCommand('branchDiff.enableMarkers');
+  await clickStatus();
+  await waitFor(() => statusShown(true), 'Clicking the status bar restores native branch markers in the open editor');
   await nextChange(0, 1);
 
   const branchOriginal = () => vscode.workspace.textDocuments.find((document) => {
@@ -208,6 +281,7 @@ async function run() {
   await nextChange(0, 1);
   await nextChange(1, 2);
   await vscode.commands.executeCommand('branchDiff.disableMarkers');
+  await waitFor(() => statusShown(false), 'The status bar reflects markers disabled through a command');
   await nextChange(0, 2);
   await vscode.commands.executeCommand('branchDiff.enableMarkers');
   await nextChange(0, 1);
@@ -250,6 +324,7 @@ async function run() {
       }
       const state = `${name}, ${saved ? 'saved' : 'unsaved'}`;
       editor.selection = new vscode.Selection(anchor, 0, anchor, 0);
+      // Both providers can be listed before native Git finishes recomputing its change anchor.
       await waitFor(async () => {
         await vscode.commands.executeCommand('closeDirtyDiff');
         await vscode.commands.executeCommand('editor.action.dirtydiff.next');
@@ -258,9 +333,10 @@ async function run() {
           const select = dropdown?.querySelector('select');
           return !!dropdown && getComputedStyle(dropdown).display !== 'none'
             && !!select && [...select.options].some(option => option.text === 'Git local working changes')
-            && [...select.options].some(option => option.text === 'Branch Diff (main)');
+            && [...select.options].some(option => option.text === 'Branch Diff (main)')
+            && select.value === 'Git local working changes';
         })()`);
-      }, `${state}: the native inline preview offers both Git and Branch Diff in its dropdown`);
+      }, `${state}: the native inline preview offers both providers and prefers the updated local Git change`);
       assert.equal(await workbench(`document.querySelector('.dirty-diff .dropdown select').value`),
         'Git local working changes', `${state}: opening the shared anchor still prefers local Git`);
       assert.equal(await workbench(`!!document.querySelector('.margin-view-overlays .dirty-diff-deleted')`),

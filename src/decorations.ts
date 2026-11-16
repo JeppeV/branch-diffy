@@ -10,25 +10,30 @@ interface BranchDecorationBaseline {
   readonly repositoryRoots: readonly vscode.Uri[];
 }
 
+interface DecoratedFile {
+  readonly uri: vscode.Uri;
+  readonly status: Change['status'];
+}
+
 function fileKey(uri: vscode.Uri): string {
   const key = path.normalize(uri.fsPath);
   return process.platform === 'win32' ? key.toLowerCase() : key;
 }
 
-/** Colors working-file resources separately from the sidebar's status badges. */
+/** Decorates working files and their parent folders like native Git changes. */
 export class BranchFileDecorations implements vscode.FileDecorationProvider, vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<vscode.Uri[] | undefined>();
   readonly onDidChangeFileDecorations = this.changed.event;
   private readonly registration = vscode.window.registerFileDecorationProvider(this);
   private baseline: BranchDecorationBaseline | undefined;
-  private files = new Map<string, Change['status']>();
+  private files = new Map<string, DecoratedFile>();
 
   constructor(private enabled: boolean) {}
 
   setEnabled(enabled: boolean): void {
     if (enabled !== this.enabled) {
       this.enabled = enabled;
-      this.changed.fire(undefined);
+      this.changed.fire([...this.files.values()].map((file) => file.uri));
     }
   }
 
@@ -39,24 +44,28 @@ export class BranchFileDecorations implements vscode.FileDecorationProvider, vsc
   }
 
   update(baseline: BranchDecorationBaseline | undefined): void {
-    const files = new Map<string, Change['status']>();
+    const files = new Map<string, DecoratedFile>();
     if (baseline) {
       const nestedRoots = baseline.repositoryRoots.filter((root) => root.scheme === 'file').filter((root) => {
         const relative = path.relative(baseline.root.fsPath, root.fsPath);
         return relative && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
       }).map(fileKey);
       for (const change of baseline.changes) {
-        const key = fileKey(vscode.Uri.joinPath(baseline.root, ...change.path.split('/')));
+        const uri = vscode.Uri.joinPath(baseline.root, ...change.path.split('/'));
+        const key = fileKey(uri);
         if (!nestedRoots.some((root) => key === root || key.startsWith(`${root}${path.sep}`))) {
-          files.set(key, change.status);
+          files.set(key, { uri, status: change.status });
         }
       }
     }
     this.baseline = baseline;
-    if (files.size !== this.files.size || [...files].some(([key, status]) => this.files.get(key) !== status)) {
+    if (files.size !== this.files.size || [...files].some(([key, file]) => this.files.get(key)?.status !== file.status)) {
+      const affected = new Map([...this.files, ...files]);
       this.files = files;
       if (this.enabled) {
-        this.changed.fire(undefined);
+        // Explicit resources let VS Code propagate into folders whose children were never revealed.
+        // Include removed files so their inherited folder decorations are cleared as well.
+        this.changed.fire([...affected.values()].map((file) => file.uri));
       }
     }
   }
@@ -65,14 +74,17 @@ export class BranchFileDecorations implements vscode.FileDecorationProvider, vsc
     if (!this.enabled || uri.scheme !== 'file') {
       return undefined;
     }
-    const status = this.files.get(fileKey(uri));
-    if (!status) {
+    const file = this.files.get(fileKey(uri));
+    if (!file) {
       return undefined;
     }
+    const { status } = file;
     const info = statusInfo[status];
     return {
+      badge: status,
       color: new vscode.ThemeColor(info.color),
       tooltip: `${info.label} between the comparison branch and HEAD`,
+      propagate: status !== 'D',
     };
   }
 

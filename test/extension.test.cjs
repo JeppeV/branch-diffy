@@ -68,6 +68,7 @@ async function harness(t, repositories = [], options = {}) {
   const state = new Map(Object.entries(options.state ?? {}));
   const contexts = new Map();
   const sourceControls = [];
+  const statusBarItems = [];
   const calls = [];
   const errors = [];
   const opened = new EventEmitter();
@@ -87,6 +88,7 @@ async function harness(t, repositories = [], options = {}) {
     Disposable, EventEmitter, Uri,
     TreeItem: class { constructor(label, state) { this.label = label; this.collapsibleState = state; } },
     TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
+    StatusBarAlignment: { Left: 1, Right: 2 },
     ThemeIcon: class { static File = { id: 'file' }; constructor(id) { this.id = id; } },
     ThemeColor: class { constructor(id) { this.id = id; } },
     FileType: { File: 1 },
@@ -114,8 +116,23 @@ async function harness(t, repositories = [], options = {}) {
     },
     window: {
       createOutputChannel: () => ({ appendLine: () => {}, dispose: () => {} }),
+      createStatusBarItem: (id, alignment, priority) => {
+        const item = {
+          id, alignment, priority, visible: false, disposed: false,
+          show() { this.visible = true; },
+          hide() { this.visible = false; },
+          dispose() { this.disposed = true; this.visible = false; },
+        };
+        statusBarItems.push(item);
+        return item;
+      },
       createTreeView: (_id, { treeDataProvider }) => {
-        view = { provider: treeDataProvider, onDidChangeVisibility: new EventEmitter().event, dispose: () => {} };
+        const visibilityChanged = new EventEmitter();
+        view = {
+          provider: treeDataProvider, visible: false, onDidChangeVisibility: visibilityChanged.event,
+          setVisible(visible) { this.visible = visible; visibilityChanged.fire({ visible }); },
+          dispose: () => {},
+        };
         return view;
       },
       registerFileDecorationProvider: (provider) => {
@@ -158,11 +175,13 @@ async function harness(t, repositories = [], options = {}) {
   const { activate } = loadWithVscode(require.resolve('../dist/extension'), vscode);
   await activate(context);
   t.after(() => context.subscriptions.forEach((item) => item.dispose()));
-  await commands.get('branchDiff.refresh')();
+  if (options.refresh !== false) {
+    await commands.get('branchDiff.refresh')();
+  }
   return {
     view, api, opened, closed, commands, providers, calls, errors, state, contexts,
     decorations: decorationProviders[0], explorerDecorations: decorationProviders[1], decorationProviders,
-    sourceControls,
+    sourceControls, statusBarItems,
     textDocuments, textChanged, textOpened, textClosed,
     marker: () => sourceControls.findLast((control) => !control.disposed),
     select: (fn) => { pick = fn; },
@@ -273,7 +292,7 @@ function explorerDecoration(h, repo, filePath) {
   return h.explorerDecorations.provideFileDecoration(Uri.file(path.join(repo.root, filePath)));
 }
 
-test('colors committed branch changes like the sidebar without adding Explorer badges', async (t) => {
+test('decorates committed branch files with status badges and native parent-folder propagation', async (t) => {
   const repo = fixture(t);
   repo.write('modified.txt', 'before\n');
   repo.write('unchanged.txt', 'unchanged\n');
@@ -302,9 +321,10 @@ test('colors committed branch changes like the sidebar without adding Explorer b
     assert.equal(decoration.color.id, color, file);
     const item = h.children(h.sections()[0]).find((item) => item.change?.path === file);
     assert.equal(decoration.color.id, h.decorations.provideFileDecoration(item.resourceUri).color.id);
-    assert.equal(decoration.badge, undefined, 'Branch coloring must not introduce a Git status badge');
-    assert.equal(decoration.propagate, undefined, 'Only changed files, not their parent directories, are colored');
+    assert.equal(decoration.badge, item.change.status, 'Changed files show their Git-style status letter');
+    assert.equal(decoration.propagate, true, 'VS Code propagates decorations to parent folders like native Git');
   }
+  // Parent folders inherit through VS Code, not through explicit file status decorations.
   for (const file of ['unchanged.txt', 'staged.txt', 'untracked.txt', 'old name.txt', 'nested', '.git/config', '../outside.txt']) {
     assert.equal(explorerDecoration(h, repo, file), undefined, file);
   }
@@ -314,7 +334,7 @@ test('colors committed branch changes like the sidebar without adding Explorer b
   assert.equal(h.decorations.provideFileDecoration(h.items().find((item) => item.change?.path === 'modified.txt').resourceUri).badge, 'M');
 });
 
-test('matches every committed status color and invalidates Explorer colors when a status changes at the same path', async (t) => {
+test('matches every committed status badge and color and invalidates decorations when a status changes at the same path', async (t) => {
   const repo = fixture(t);
   const h = await harness(t);
   const colors = {
@@ -335,6 +355,8 @@ test('matches every committed status color and invalidates Explorer colors when 
     const sidebar = h.decorations.provideFileDecoration(Uri.from({ scheme: 'branch-diff-status', path: `/${status}.txt`, query: status }));
     assert.equal(decoration.color.id, color, status);
     assert.equal(decoration.color.id, sidebar.color.id, status);
+    assert.equal(decoration.badge, status);
+    assert.equal(decoration.propagate, status !== 'D', 'Deletion decorations stay on the file, like native Git');
     assert.match(decoration.tooltip, new RegExp(`^${sidebar.tooltip} between`));
   }
   const events = [];
@@ -343,10 +365,31 @@ test('matches every committed status color and invalidates Explorer colors when 
     ...baseline, changes: baseline.changes.map((change) => change.path === 'A.txt' ? { ...change, status: 'M' } : change),
   });
   assert.equal(explorerDecoration(h, repo, 'A.txt').color.id, colors.M);
+  assert.equal(explorerDecoration(h, repo, 'A.txt').badge, 'M');
   assert.deepEqual(events, [true], 'Changing only the status still invalidates cached decorations');
 });
 
-test('ties Explorer coloring to the remembered marker toggle while leaving sidebar badges unchanged', async (t) => {
+test('stops propagating folder decorations when a modified branch file becomes deleted', async (t) => {
+  const repo = fixture(t);
+  const h = await harness(t);
+  const baseline = {
+    root: Uri.file(repo.root), baseName: 'main', repositoryRoots: [],
+    changes: [{ status: 'M', path: 'parent/child/file.txt' }],
+  };
+  h.explorerDecorations.update(baseline);
+  assert.equal(explorerDecoration(h, repo, 'parent/child/file.txt').propagate, true);
+  const events = [];
+  h.explorerDecorations.onDidChangeFileDecorations((uris) => events.push(uris.map((uri) => uri.fsPath)));
+  h.explorerDecorations.update({ ...baseline, changes: [{ status: 'D', path: 'parent/child/file.txt' }] });
+  const decoration = explorerDecoration(h, repo, 'parent/child/file.txt');
+  assert.equal(decoration.propagate, false, 'Deleted files must not color or badge their ancestors');
+  assert.equal(decoration.badge, 'D');
+  assert.equal(decoration.color.id, 'gitDecoration.deletedResourceForeground');
+  assert.deepEqual(events, [[path.join(repo.root, 'parent/child/file.txt')]],
+    'The status change invalidates previously propagated folder decorations');
+});
+
+test('ties Explorer colors, badges, and propagation to the remembered marker toggle while leaving sidebar badges unchanged', async (t) => {
   const repo = fixture(t);
   repo.write('file.txt', 'before\n'); repo.commit('base');
   repo.git('checkout', '-b', 'feature');
@@ -360,12 +403,37 @@ test('ties Explorer coloring to the remembered marker toggle while leaving sideb
   for (const [command, enabled] of [['enableMarkers', true], ['toggleMarkers', false], ['toggleMarkers', true], ['disableMarkers', false]]) {
     await h.run(command);
     assert.equal(!!explorerDecoration(h, repo, 'file.txt'), enabled, command);
+    if (enabled) {
+      assert.equal(explorerDecoration(h, repo, 'file.txt').badge, 'M');
+      assert.equal(explorerDecoration(h, repo, 'file.txt').propagate, true);
+    }
     assert.equal(h.decorations.provideFileDecoration(h.items()[0].resourceUri).badge, 'M');
   }
-  assert.deepEqual(events, [undefined, undefined, undefined, undefined], 'Each state change invalidates cached file decorations');
+  assert.deepEqual(events.map((uris) => uris.map((uri) => uri.fsPath)),
+    Array.from({ length: 4 }, () => [path.join(repo.root, 'file.txt')]),
+    'Each state change explicitly refreshes file decorations, including inherited folder decorations');
   await h.run('disableMarkers');
   assert.equal(events.length, 4, 'Idempotent marker commands do not repaint decorations');
   assert.equal(h.decorationProviders.length, 2, 'Toggling reuses the registered provider');
+});
+
+test('notifies explicit added and removed file URIs so unopened parent folders update', async (t) => {
+  const repo = fixture(t);
+  const h = await harness(t);
+  const events = [];
+  h.explorerDecorations.onDidChangeFileDecorations((uris) => events.push(uris.map((uri) => path.relative(repo.root, uri.fsPath))));
+  const first = path.join('parent', 'child', 'first.txt');
+  const second = path.join('other', 'second.txt');
+  const baseline = {
+    root: Uri.file(repo.root), baseName: 'main', repositoryRoots: [],
+    changes: [{ status: 'M', path: 'parent/child/first.txt' }],
+  };
+  h.explorerDecorations.update(baseline);
+  assert.deepEqual(events, [[first]], 'New files are notified without requesting their decoration first');
+  h.explorerDecorations.update({ ...baseline, changes: [{ status: 'A', path: 'other/second.txt' }] });
+  assert.deepEqual(events.at(-1), [first, second], 'Removed and newly changed paths both update their ancestors');
+  h.explorerDecorations.update(undefined);
+  assert.deepEqual(events.at(-1), [second], 'Clearing the comparison removes remaining propagated decorations');
 });
 
 test('refreshes Explorer coloring on commits, comparison ref updates, and missing branches', async (t) => {
@@ -1122,6 +1190,64 @@ test('toggles branch markers independently and remembers the choice for the work
   const disabled = await harness(t, [repository(repo)], { state: { markersEnabled: false } });
   assert.equal(disabled.marker(), undefined, 'A remembered off state is respected on activation');
   assert.equal(disabled.contexts.get('branchDiff.markersEnabled'), false);
+});
+
+test('shows a clickable marker status before the sidebar opens and disposes it with the view', async (t) => {
+  const h = await harness(t, [], { refresh: false });
+  assert.equal(h.statusBarItems.length, 1);
+  const [status] = h.statusBarItems;
+  assert.equal(h.view.visible, false);
+  assert.equal(status.id, 'branchDiff.markers');
+  assert.equal(status.name, 'Branch Diff Markers');
+  assert.equal(status.alignment, 1);
+  assert.equal(status.visible, true, 'The status item is shown even without a repository or sidebar refresh');
+  assert.equal(status.text, '$(eye) Branch Diff: On');
+  assert.equal(status.command, 'branchDiff.toggleMarkers');
+  assert.match(status.tooltip, /markers are on.*Click to disable/);
+  assert.match(status.accessibilityInformation.label, /markers: On.*Click to disable/);
+
+  await h.commands.get(status.command)();
+  assert.equal(status.text, '$(eye-closed) Branch Diff: Off');
+  assert.equal(h.contexts.get('branchDiff.markersEnabled'), false);
+  assert.equal(h.state.get('markersEnabled'), false);
+  assert.equal(status.visible, true);
+  h.view.provider.dispose();
+  assert.equal(status.disposed, true);
+  assert.equal(status.visible, false);
+});
+
+test('keeps marker status synchronized with remembered state and every toggle while the sidebar is hidden', async (t) => {
+  const repo = fixture(t);
+  repo.write('file.txt', 'base\n'); repo.commit('base');
+  const h = await harness(t, [repository(repo)], { state: { markersEnabled: false } });
+  const [status] = h.statusBarItems;
+  assert.equal(status.text, '$(eye-closed) Branch Diff: Off');
+  assert.match(status.tooltip, /markers are off.*Click to enable/);
+  assert.match(status.accessibilityInformation.label, /markers: Off.*Click to enable/);
+  await nextRefresh(h, () => h.view.setVisible(true));
+  h.view.setVisible(false);
+  for (const [command, enabled] of [
+    ['enableMarkers', true], ['enableMarkers', true], ['disableMarkers', false], ['disableMarkers', false],
+    ['toggleMarkers', true], ['toggleMarkers', false],
+  ]) {
+    await h.run(command);
+    assert.equal(status.text, `$(${enabled ? 'eye' : 'eye-closed'}) Branch Diff: ${enabled ? 'On' : 'Off'}`, command);
+    assert.match(status.tooltip, enabled ? /markers are on.*Click to disable/ : /markers are off.*Click to enable/);
+    assert.match(status.accessibilityInformation.label, enabled ? /markers: On.*Click to disable/ : /markers: Off.*Click to enable/);
+    assert.equal(status.visible, true);
+    assert.equal(h.view.visible, false);
+    assert.equal(h.contexts.get('branchDiff.markersEnabled'), enabled);
+    assert.equal(h.state.get('markersEnabled'), enabled);
+    assert.equal(!!h.marker(), enabled);
+  }
+  await h.run('refresh');
+  assert.equal(status.text, '$(eye-closed) Branch Diff: Off');
+  assert.equal(h.statusBarItems.length, 1, 'Toggling and refreshing reuse the same status bar item');
+});
+
+test('activates after startup so marker status is available without opening the sidebar', () => {
+  const { activationEvents } = require('../package.json');
+  assert.ok(activationEvents.includes('onStartupFinished'));
 });
 
 test('contributes distinct on/off icons and labels using supported menu conditions', () => {

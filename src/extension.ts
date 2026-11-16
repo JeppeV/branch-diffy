@@ -67,6 +67,7 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
   private readonly view: vscode.TreeView<Item>;
   private readonly markers: BranchMarkers;
   private readonly explorerDecorations: BranchFileDecorations;
+  private readonly markersStatus: vscode.StatusBarItem;
   private repository: Repository | undefined;
   private items: Item[] = [new MessageItem('Loading repositories…')];
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -83,11 +84,16 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
     this.view = vscode.window.createTreeView('branchDiff.files', { treeDataProvider: this, showCollapseAll: false });
     this.markers = new BranchMarkers(git, output, context.workspaceState.get<boolean>('markersEnabled') ?? true);
     this.explorerDecorations = new BranchFileDecorations(this.markers.enabled);
+    this.markersStatus = vscode.window.createStatusBarItem('branchDiff.markers', vscode.StatusBarAlignment.Left, 99);
+    this.markersStatus.name = 'Branch Diff Markers';
+    this.markersStatus.command = 'branchDiff.toggleMarkers';
+    this.updateMarkersStatus();
     void vscode.commands.executeCommand('setContext', 'branchDiff.markersEnabled', this.markers.enabled);
     this.disposables.push(
       this.view,
       this.markers,
       this.explorerDecorations,
+      this.markersStatus,
       this.changed,
       api.onDidOpenRepository(() => this.repositoriesChanged()),
       api.onDidCloseRepository(() => this.repositoriesChanged()),
@@ -110,6 +116,7 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
       vscode.commands.registerCommand('branchDiff.openFile', (item: ChangeItem) => this.openFile(item)),
       vscode.commands.registerCommand('branchDiff.openDiff', (item: ChangeItem) => this.openDiff(item)),
     );
+    this.markersStatus.show();
     this.repositoriesChanged();
   }
 
@@ -260,9 +267,19 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
     }
   }
 
+  private updateMarkersStatus(): void {
+    const enabled = this.markers.enabled;
+    const state = enabled ? 'On' : 'Off';
+    const action = enabled ? 'disable' : 'enable';
+    this.markersStatus.text = `$(${enabled ? 'eye' : 'eye-closed'}) Branch Diff: ${state}`;
+    this.markersStatus.tooltip = `Branch diff markers are ${state.toLowerCase()}. Click to ${action}.`;
+    this.markersStatus.accessibilityInformation = { label: `Branch Diff markers: ${state}. Click to ${action}.` };
+  }
+
   private async setMarkersEnabled(enabled: boolean): Promise<void> {
     this.markers.setEnabled(enabled);
     this.explorerDecorations.setEnabled(enabled);
+    this.updateMarkersStatus();
     await vscode.commands.executeCommand('setContext', 'branchDiff.markersEnabled', enabled);
     await this.context.workspaceState.update('markersEnabled', enabled);
   }

@@ -1,9 +1,9 @@
 {
   "name": "branch-diff",
   "displayName": "Branch Diff",
-  "description": "Browse files changed between your checked-out branch and another branch.",
+  "description": "Compare Git branches with a changed-files sidebar, native gutter markers, and separate unstaged changes.",
   "version": "0.1.0",
-  "publisher": "branch-diff-local",
+  "publisher": "JeppeVinberg",
   "license": "MIT",
   "engines": {
     "vscode": "^1.95.0"
@@ -13,7 +13,7 @@
   "main": "./dist/extension.js",
   "extensionKind": ["workspace"],
   "extensionDependencies": ["vscode.git"],
-  "activationEvents": ["onView:branchDiff.files"],
+  "activationEvents": ["onStartupFinished", "onView:branchDiff.files"],
   "capabilities": {
     "virtualWorkspaces": false,
     "untrustedWorkspaces": {
@@ -83,7 +83,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
-    "@types/vscode": "^1.95.0",
+    "@types/vscode": "1.95.0",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^4.1.1",
     "typescript": "^5.7.2"

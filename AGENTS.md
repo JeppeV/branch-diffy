@@ -6,7 +6,7 @@
 - Tests import generated `dist/` modules, not `src/`. For one test, run `npm.cmd run compile`, then `node --test --test-name-pattern="toggles branch markers" test/extension.test.cjs`. Do not edit `dist/` directly.
 - `npm.cmd test` uses real temporary Git repositories but mocks VS Code. When adding a module that imports `vscode`, update `loadWithVscode` in `test/extension.test.cjs` if the mock loader must intercept that module too. Fixtures isolate Git identity/configuration; no existing Git workspace is required.
 - `npm.cmd run test:vscode` opens a real GUI test host using an isolated profile and fixture repository. It downloads/caches VS Code 1.95.3 in `.vscode-test/` unless `VSCODE_EXECUTABLE_PATH` selects another executable. If installed Code is update-locked, clear that override (`$env:VSCODE_EXECUTABLE_PATH = $null`) rather than modifying the user's installation. Use this suite for native SCM/editor behavior that mocks cannot prove.
-- F5 runs **Run Branch Diff** and compiles automatically; open a Git repository in the development host, trust it, and open the Branch Diff view to activate. Restart the development session after changing manifest contributions. No VSIX installation is needed.
+- F5 runs **Run Branch Diff** and compiles automatically; open a Git repository in the development host and trust it. Branch Diff activates after startup, so its marker status bar toggle is available without opening the sidebar. Restart the development session after changing manifest contributions. No VSIX installation is needed.
 
 ## Comparison semantics
 
@@ -23,7 +23,7 @@
 - Preserve generation/cancellation guards in view refreshes and marker lookups. A branch/repository switch or disabling markers must invalidate pending results. Baseline identity includes the commit ID: advancing the same branch name must refresh already-open editors without recreating providers on every unchanged refresh.
 - Marker snapshots are live: notify them on editor changes and repository/index refreshes, invalidate cached Git inputs after refresh, and discard stale in-flight reads. Reuse Git inputs while typing. Bound synthetic line-diff work and yield expensive text files to native Git; do not synthesize binary/non-UTF-8 bytes.
 - VS Code ignores `toggled` in contributed command metadata. Marker state is shown through separate enable/disable commands with opposite `when` conditions on `branchDiff.markersEnabled` and distinct eye icons. Keep these actions idempotent and retain `branchDiff.toggleMarkers` for existing keybindings.
-- VS Code compatibility starts at 1.95, but the lockfile's `@types/vscode` is newer. Successful typechecking alone does not establish minimum-version API compatibility; the default editor smoke test targets 1.95.3.
+- VS Code compatibility starts at 1.95 and `@types/vscode` is pinned to 1.95.0. Keep API types aligned with the minimum version. Typechecking alone does not establish runtime compatibility; the default editor smoke test targets 1.95.3.
 
 ## Packaging
 
