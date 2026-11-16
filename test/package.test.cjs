@@ -7,6 +7,24 @@ const manifest = require('../package.json');
 
 const root = path.resolve(__dirname, '..');
 
+test('uses the Branch Diffy identity throughout the extension manifest', () => {
+  assert.equal(manifest.name, 'branch-diffy');
+  assert.equal(manifest.displayName, 'Branch Diffy');
+  assert.ok(manifest.activationEvents.includes('onView:branchDiffy.files'));
+  assert.deepEqual(manifest.contributes.viewsContainers.activitybar, [
+    { id: 'branchDiffy', title: 'Branch Diffy', icon: 'media/branch-diffy.svg' },
+  ]);
+  assert.deepEqual(manifest.contributes.views.branchDiffy, [
+    { id: 'branchDiffy.files', name: 'Changed Files', contextualTitle: 'Branch Diffy' },
+  ]);
+  for (const command of manifest.contributes.commands) {
+    assert.ok(command.command.startsWith('branchDiffy.'));
+    assert.equal(command.category, 'Branch Diffy');
+  }
+  assert.equal(manifest.contributes.configuration.title, 'Branch Diffy');
+  assert.deepEqual(Object.keys(manifest.contributes.configuration.properties), ['branchDiffy.defaultBaseBranch']);
+});
+
 test('packages only runtime files, assets, and public release documentation', async () => {
   const files = (await listFiles({ cwd: root })).map((file) => file.replace(/\\/g, '/'));
   const required = [
@@ -31,8 +49,10 @@ test('pins API types to the minimum supported VS Code version', () => {
   assert.equal(manifest.devDependencies['@types/vscode'], manifest.engines.vscode.replace(/^\^/, ''));
 });
 
-test('keeps release versions consistent with the lockfile and changelog', () => {
+test('keeps release metadata consistent with the lockfile and changelog', () => {
   const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
+  assert.equal(lock.name, manifest.name);
+  assert.equal(lock.packages[''].name, manifest.name);
   assert.equal(lock.version, manifest.version);
   assert.equal(lock.packages[''].version, manifest.version);
   const changelog = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');

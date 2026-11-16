@@ -40,6 +40,6 @@ The editor smoke test defaults to VS Code 1.95.3, the minimum supported release 
 Before distributing the VSIX:
 
 1. Review the final Git diff, version, and changelog. Keep `package.json` and `package-lock.json` versions in sync; `npm version <version> --no-git-tag-version` updates both without creating a commit or tag.
-2. Install the generated `branch-diff-<version>.vsix` in an isolated VS Code profile and confirm the sidebar, branch selection, diffs, and marker toggle work. Development-host tests do not prove installation of the archive.
+2. Install the generated `branch-diffy-<version>.vsix` in an isolated VS Code profile and confirm the sidebar, branch selection, diffs, and marker toggle work. Development-host tests do not prove installation of the archive.
 3. Confirm the correct publisher and version are embedded in the archive. Publishing the wrong extension ID cannot be fixed by changing a display name.
 4. Publish only after explicit release approval, using the verified VSIX and Marketplace credentials kept outside this repository.

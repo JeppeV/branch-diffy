@@ -19,7 +19,7 @@ async function availablePort() {
 async function main() {
   const cleanup = [];
   const repo = fixture({ after: (action) => cleanup.push(action) });
-  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode', 'branch-diff-vscode-'));
+  const data = fs.mkdtempSync(path.join(os.tmpdir(), 'opencode', 'branch-diffy-vscode-'));
   cleanup.push(() => fs.rmSync(data, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   try {
     repo.write('modified.txt', 'unchanged first\nbefore\nunchanged third\nunchanged fourth\n');
@@ -55,8 +55,8 @@ async function main() {
       extensionDevelopmentPath: path.resolve(__dirname, '..'),
       extensionTestsPath: path.join(__dirname, 'vscode-smoke.cjs'),
       extensionTestsEnv: {
-        BRANCH_DIFF_TEST_ROOT: repo.root, BRANCH_DIFF_TEST_BASE: base, BRANCH_DIFF_TEST_HEAD: head,
-        BRANCH_DIFF_TEST_NODE: process.execPath, BRANCH_DIFF_TEST_DEBUG_PORT: String(debugPort),
+        BRANCH_DIFFY_TEST_ROOT: repo.root, BRANCH_DIFFY_TEST_BASE: base, BRANCH_DIFFY_TEST_HEAD: head,
+        BRANCH_DIFFY_TEST_NODE: process.execPath, BRANCH_DIFFY_TEST_DEBUG_PORT: String(debugPort),
       },
       launchArgs: [
         repo.root, '--disable-extensions', '--disable-gpu', '--disable-workspace-trust',

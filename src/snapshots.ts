@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { Git } from './git';
 import { createMarkerBaseline } from './markerBaseline';
 
-export const snapshotScheme = 'branch-diff-snapshot';
+export const snapshotScheme = 'branch-diffy-snapshot';
 
 interface CommitSnapshot {
   readonly root: string;

@@ -176,7 +176,7 @@ async function harness(t, repositories = [], options = {}) {
   await activate(context);
   t.after(() => context.subscriptions.forEach((item) => item.dispose()));
   if (options.refresh !== false) {
-    await commands.get('branchDiff.refresh')();
+    await commands.get('branchDiffy.refresh')();
   }
   return {
     view, api, opened, closed, commands, providers, calls, errors, state, contexts,
@@ -191,7 +191,7 @@ async function harness(t, repositories = [], options = {}) {
       const children = view.provider.getChildren(item);
       return children.length ? children : [item];
     }),
-    run: (command, ...args) => vscode.commands.executeCommand(`branchDiff.${command}`, ...args),
+    run: (command, ...args) => vscode.commands.executeCommand(`branchDiffy.${command}`, ...args),
   };
 }
 
@@ -238,8 +238,8 @@ test('shows native-style status decorations scoped to the branch view', async (t
   assert.deepEqual(h.items().map((item) => item.label), ['deleted.txt', 'modified.txt', 'added.txt']);
   assert.equal(h.items()[2].description, 'nested');
   for (const item of h.items()) {
-    assert.equal(item.command.command, 'branchDiff.openFile');
-    assert.equal(item.contextValue, 'branchDiff.change');
+    assert.equal(item.command.command, 'branchDiffy.openFile');
+    assert.equal(item.contextValue, 'branchDiffy.change');
     const decoration = h.decorations.provideFileDecoration(item.resourceUri);
     assert.equal(decoration.badge, item.change.status);
     assert.match(decoration.color.id, /^gitDecoration\./);
@@ -259,7 +259,7 @@ test('opens working files, deleted snapshots, and committed diffs including empt
   const head = repo.commit('feature');
   const h = await harness(t, [repository(repo)]);
   const files = Object.fromEntries(h.items().map((item) => [item.change.status, item]));
-  const snapshots = h.providers.get('branch-diff-snapshot');
+  const snapshots = h.providers.get('branch-diffy-snapshot');
   assert.equal(snapshots.settings.isReadonly, true);
 
   await h.run('openFile', files.M);
@@ -268,7 +268,7 @@ test('opens working files, deleted snapshots, and committed diffs including empt
 
   await h.run('openFile', files.D);
   const deleted = h.calls.at(-1)[1];
-  assert.equal(deleted.scheme, 'branch-diff-snapshot');
+  assert.equal(deleted.scheme, 'branch-diffy-snapshot');
   assert.equal(JSON.parse(deleted.query).commit, base);
   assert.equal(Buffer.from(await snapshots.provider.readFile(deleted)).toString(), 'deleted\n');
   assert.throws(() => snapshots.provider.writeFile(deleted, new Uint8Array()), /read-only/);
@@ -328,7 +328,7 @@ test('decorates committed branch files with status badges and native parent-fold
   for (const file of ['unchanged.txt', 'staged.txt', 'untracked.txt', 'old name.txt', 'nested', '.git/config', '../outside.txt']) {
     assert.equal(explorerDecoration(h, repo, file), undefined, file);
   }
-  for (const scheme of ['branch-diff-status', 'branch-diff-snapshot', 'git', 'untitled']) {
+  for (const scheme of ['branch-diffy-status', 'branch-diffy-snapshot', 'git', 'untitled']) {
     assert.equal(h.explorerDecorations.provideFileDecoration(Uri.from({ scheme, path: path.join(repo.root, 'modified.txt') })), undefined);
   }
   assert.equal(h.decorations.provideFileDecoration(h.items().find((item) => item.change?.path === 'modified.txt').resourceUri).badge, 'M');
@@ -352,7 +352,7 @@ test('matches every committed status badge and color and invalidates decorations
   h.explorerDecorations.update(baseline);
   for (const [status, color] of Object.entries(colors)) {
     const decoration = explorerDecoration(h, repo, `${status}.txt`);
-    const sidebar = h.decorations.provideFileDecoration(Uri.from({ scheme: 'branch-diff-status', path: `/${status}.txt`, query: status }));
+    const sidebar = h.decorations.provideFileDecoration(Uri.from({ scheme: 'branch-diffy-status', path: `/${status}.txt`, query: status }));
     assert.equal(decoration.color.id, color, status);
     assert.equal(decoration.color.id, sidebar.color.id, status);
     assert.equal(decoration.badge, status);
@@ -548,7 +548,7 @@ test('uses a HEAD snapshot when a committed file is missing from the working tre
   const h = await harness(t, [repository(repo)]);
   await h.run('openFile', h.items()[0]);
   const snapshot = h.calls.at(-1)[1];
-  assert.equal(snapshot.scheme, 'branch-diff-snapshot');
+  assert.equal(snapshot.scheme, 'branch-diffy-snapshot');
   assert.equal(JSON.parse(snapshot.query).commit, head);
   assert.deepEqual(h.errors, []);
 });
@@ -560,7 +560,7 @@ test('offers a branch picker when the default branch is missing and remembers th
   repo.git('checkout', '-b', 'feature');
   const h = await harness(t, [repository(repo)], { defaultBranch: 'missing-main' });
   assert.match(h.items()[0].label, /not found/);
-  assert.equal(h.items()[0].command.command, 'branchDiff.selectBranch');
+  assert.equal(h.items()[0].command.command, 'branchDiffy.selectBranch');
   h.select((choices) => choices.find((choice) => choice.branch.name === 'main'));
   await h.run('selectBranch');
   assert.equal(h.state.get(`baseBranch:${Uri.file(repo.root).toString()}`), 'refs/heads/main');
@@ -578,7 +578,7 @@ test('supports selecting repositories and updates as repositories close', async 
   const second = repository(two);
   const h = await harness(t, [first, second]);
   const firstMarker = h.marker();
-  assert.ok(h.calls.some(([command, key, value]) => command === 'setContext' && key === 'branchDiff.repositoryCount' && value === 2));
+  assert.ok(h.calls.some(([command, key, value]) => command === 'setContext' && key === 'branchDiffy.repositoryCount' && value === 2));
   h.select((choices) => choices.find((choice) => choice.repository === second));
   await h.run('selectRepository');
   assert.equal(h.state.get('selectedRepository'), second.rootUri.toString());
@@ -607,14 +607,14 @@ test('registers an additional read-only native quick-diff provider without infla
   repo.commit('feature');
   const h = await harness(t, [repository(repo)]);
   const marker = h.marker();
-  assert.equal(marker.id, 'branchDiff');
-  assert.equal(marker.label, 'Branch Diff (main)');
+  assert.equal(marker.id, 'branchDiffy');
+  assert.equal(marker.label, 'Branch Diffy (main)');
   assert.equal(marker.rootUri.fsPath, repo.root);
   assert.equal(marker.inputBox.visible, false);
   assert.equal(marker.count, 0);
   const uri = await original(h, repo, 'file.txt');
   assert.equal(JSON.parse(uri.query).commit, base);
-  const content = await h.providers.get('branch-diff-snapshot').provider.readFile(uri);
+  const content = await h.providers.get('branch-diffy-snapshot').provider.readFile(uri);
   assert.equal(Buffer.from(content).toString(), 'base\n');
 });
 
@@ -694,7 +694,7 @@ test('synthesizes renamed and added files using their current index paths', asyn
   repo.write('new.txt', 'first\nafter\nlocal\nlast\n');
   repo.write('added.txt', 'committed addition\nlocal\n');
   const h = await harness(t, [repository(repo)]);
-  const snapshots = h.providers.get('branch-diff-snapshot').provider;
+  const snapshots = h.providers.get('branch-diffy-snapshot').provider;
   const renamed = await original(h, repo, 'new.txt');
   assert.equal(JSON.parse(renamed.query).path, 'old.txt');
   assert.equal(JSON.parse(renamed.query).markerPath, 'new.txt');
@@ -743,7 +743,7 @@ test('leaves untracked files to native Git and preserves raw binary marker basel
   repo.write('binary.bin', Buffer.from([0, 1, 2, 3]));
   repo.write('[untracked].txt', 'local only\n');
   const h = await harness(t, [repository(repo)]);
-  const snapshots = h.providers.get('branch-diff-snapshot').provider;
+  const snapshots = h.providers.get('branch-diffy-snapshot').provider;
   assert.equal(Buffer.from(await snapshots.readFile(await original(h, repo, '[untracked].txt'))).toString(), 'local only\n');
   assert.deepEqual(Buffer.from(await snapshots.readFile(await original(h, repo, 'binary.bin'))), bytes);
 });
@@ -831,8 +831,8 @@ test('groups unstaged files separately with native badges and stable section ide
   assert.deepEqual(h.children(untracked).map((item) => item.change.path), ['[literal].txt', 'nested/new file.txt']);
   for (const item of h.children(untracked)) {
     assert.equal(item.change.status, 'U');
-    assert.equal(item.contextValue, 'branchDiff.change');
-    assert.equal(item.command.command, 'branchDiff.openFile');
+    assert.equal(item.contextValue, 'branchDiffy.change');
+    assert.equal(item.command.command, 'branchDiffy.openFile');
     assert.match(item.tooltip, /Index → Working tree \(unstaged\)/);
     assert.deepEqual(h.children(item), []);
     const decoration = h.decorations.provideFileDecoration(item.resourceUri);
@@ -861,7 +861,7 @@ test('opens untracked working files and diffs them against an empty byte-preserv
   const [command, left, right, title] = h.calls.at(-1);
   assert.equal(command, 'vscode.diff');
   assert.equal(title, 'new image.bin (Unstaged)');
-  assert.equal(left.scheme, 'branch-diff-snapshot');
+  assert.equal(left.scheme, 'branch-diffy-snapshot');
   assert.equal(JSON.parse(left.query).empty, true);
   assert.equal((await h.providers.get(left.scheme).provider.readFile(left)).byteLength, 0);
   assert.equal(right.scheme, 'file');
@@ -899,7 +899,7 @@ test('shows tracked unstaged edits separately and uses the index rather than HEA
   const [command, left, right, title] = h.calls.at(-1);
   assert.equal(command, 'vscode.diff');
   assert.equal(title, 'file.txt (Unstaged)');
-  assert.equal(left.scheme, 'branch-diff-snapshot');
+  assert.equal(left.scheme, 'branch-diffy-snapshot');
   assert.deepEqual(JSON.parse(left.query), { root: repo.root, path: 'file.txt', indexStage: 0 });
   assert.equal(Buffer.from(await h.providers.get(left.scheme).provider.readFile(left)).toString(), 'staged\n');
   assert.equal(right.scheme, 'file');
@@ -919,11 +919,11 @@ test('opens unstaged deletions from the index and diffs them against an empty si
   const item = h.children(h.sections()[1])[0];
   assert.equal(item.change.status, 'D');
   await h.run('openFile', item);
-  assert.equal(h.calls.at(-1)[1].scheme, 'branch-diff-snapshot');
+  assert.equal(h.calls.at(-1)[1].scheme, 'branch-diffy-snapshot');
   assert.deepEqual(JSON.parse(h.calls.at(-1)[1].query), { root: repo.root, path: 'deleted.txt', indexStage: 0 });
   await h.run('openDiff', item);
   const [, left, right] = h.calls.at(-1);
-  assert.equal(left.scheme, 'branch-diff-snapshot');
+  assert.equal(left.scheme, 'branch-diffy-snapshot');
   assert.equal(JSON.parse(left.query).indexStage, 0);
   assert.equal(Buffer.from(await h.providers.get(left.scheme).provider.readFile(left)).toString(), 'staged before deletion\n');
   assert.equal(JSON.parse(right.query).empty, true);
@@ -940,7 +940,7 @@ test('refreshes live index snapshots per repository while committed snapshots st
   repo.write('file.txt', 'working\n');
   const tracked = repository(repo);
   const h = await harness(t, [tracked, repository(other)]);
-  const provider = h.providers.get('branch-diff-snapshot').provider;
+  const provider = h.providers.get('branch-diffy-snapshot').provider;
   await h.run('openDiff', h.children(h.sections()[1])[0]);
   const index = h.calls.at(-1)[1];
   const before = await provider.stat(index);
@@ -1043,7 +1043,7 @@ test('keeps committed deletions and recreated untracked files as distinct rows',
   assert.notEqual(deleted.id, untracked.id);
   assert.equal(h.view.badge.value, 2);
   await h.run('openFile', deleted);
-  assert.equal(h.calls.at(-1)[1].scheme, 'branch-diff-snapshot');
+  assert.equal(h.calls.at(-1)[1].scheme, 'branch-diffy-snapshot');
   await h.run('openFile', untracked);
   assert.equal(h.calls.at(-1)[1].scheme, 'file');
   await h.run('openDiff', deleted);
@@ -1165,7 +1165,7 @@ test('ignores other repositories, snapshots, Git metadata, and ignored files', a
   assert.equal(await original(h, repo, 'nested/file.txt'), undefined);
   assert.equal(await original(h, repo, '.git/config'), undefined);
   assert.equal(await original(h, repo, 'ignored/file.txt'), undefined);
-  assert.equal(await provider.provideOriginalResource(Uri.from({ scheme: 'branch-diff-snapshot', path: '/file.txt' }), token), undefined);
+  assert.equal(await provider.provideOriginalResource(Uri.from({ scheme: 'branch-diffy-snapshot', path: '/file.txt' }), token), undefined);
 });
 
 test('toggles branch markers independently and remembers the choice for the workspace', async (t) => {
@@ -1174,22 +1174,22 @@ test('toggles branch markers independently and remembers the choice for the work
   repo.commit('base');
   const h = await harness(t, [repository(repo)]);
   const marker = h.marker();
-  assert.equal(h.contexts.get('branchDiff.markersEnabled'), true);
+  assert.equal(h.contexts.get('branchDiffy.markersEnabled'), true);
   await h.run('toggleMarkers');
   assert.equal(marker.disposed, true);
   assert.equal(h.marker(), undefined);
   assert.equal(h.state.get('markersEnabled'), false);
-  assert.equal(h.contexts.get('branchDiff.markersEnabled'), false);
-  assert.ok(h.calls.some(([command, key, value]) => command === 'setContext' && key === 'branchDiff.markersEnabled' && value === false));
+  assert.equal(h.contexts.get('branchDiffy.markersEnabled'), false);
+  assert.ok(h.calls.some(([command, key, value]) => command === 'setContext' && key === 'branchDiffy.markersEnabled' && value === false));
   await h.run('refresh');
   assert.equal(h.marker(), undefined, 'Refresh does not turn markers back on');
   await h.run('toggleMarkers');
   assert.equal(h.state.get('markersEnabled'), true);
-  assert.equal(h.contexts.get('branchDiff.markersEnabled'), true);
-  assert.equal(h.marker().label, 'Branch Diff (main)');
+  assert.equal(h.contexts.get('branchDiffy.markersEnabled'), true);
+  assert.equal(h.marker().label, 'Branch Diffy (main)');
   const disabled = await harness(t, [repository(repo)], { state: { markersEnabled: false } });
   assert.equal(disabled.marker(), undefined, 'A remembered off state is respected on activation');
-  assert.equal(disabled.contexts.get('branchDiff.markersEnabled'), false);
+  assert.equal(disabled.contexts.get('branchDiffy.markersEnabled'), false);
 });
 
 test('shows a clickable marker status before the sidebar opens and disposes it with the view', async (t) => {
@@ -1197,18 +1197,18 @@ test('shows a clickable marker status before the sidebar opens and disposes it w
   assert.equal(h.statusBarItems.length, 1);
   const [status] = h.statusBarItems;
   assert.equal(h.view.visible, false);
-  assert.equal(status.id, 'branchDiff.markers');
-  assert.equal(status.name, 'Branch Diff Markers');
+  assert.equal(status.id, 'branchDiffy.markers');
+  assert.equal(status.name, 'Branch Diffy Markers');
   assert.equal(status.alignment, 1);
   assert.equal(status.visible, true, 'The status item is shown even without a repository or sidebar refresh');
-  assert.equal(status.text, '$(eye) Branch Diff: On');
-  assert.equal(status.command, 'branchDiff.toggleMarkers');
+  assert.equal(status.text, '$(eye) Branch Diffy: On');
+  assert.equal(status.command, 'branchDiffy.toggleMarkers');
   assert.match(status.tooltip, /markers are on.*Click to disable/);
   assert.match(status.accessibilityInformation.label, /markers: On.*Click to disable/);
 
   await h.commands.get(status.command)();
-  assert.equal(status.text, '$(eye-closed) Branch Diff: Off');
-  assert.equal(h.contexts.get('branchDiff.markersEnabled'), false);
+  assert.equal(status.text, '$(eye-closed) Branch Diffy: Off');
+  assert.equal(h.contexts.get('branchDiffy.markersEnabled'), false);
   assert.equal(h.state.get('markersEnabled'), false);
   assert.equal(status.visible, true);
   h.view.provider.dispose();
@@ -1221,7 +1221,7 @@ test('keeps marker status synchronized with remembered state and every toggle wh
   repo.write('file.txt', 'base\n'); repo.commit('base');
   const h = await harness(t, [repository(repo)], { state: { markersEnabled: false } });
   const [status] = h.statusBarItems;
-  assert.equal(status.text, '$(eye-closed) Branch Diff: Off');
+  assert.equal(status.text, '$(eye-closed) Branch Diffy: Off');
   assert.match(status.tooltip, /markers are off.*Click to enable/);
   assert.match(status.accessibilityInformation.label, /markers: Off.*Click to enable/);
   await nextRefresh(h, () => h.view.setVisible(true));
@@ -1231,17 +1231,17 @@ test('keeps marker status synchronized with remembered state and every toggle wh
     ['toggleMarkers', true], ['toggleMarkers', false],
   ]) {
     await h.run(command);
-    assert.equal(status.text, `$(${enabled ? 'eye' : 'eye-closed'}) Branch Diff: ${enabled ? 'On' : 'Off'}`, command);
+    assert.equal(status.text, `$(${enabled ? 'eye' : 'eye-closed'}) Branch Diffy: ${enabled ? 'On' : 'Off'}`, command);
     assert.match(status.tooltip, enabled ? /markers are on.*Click to disable/ : /markers are off.*Click to enable/);
     assert.match(status.accessibilityInformation.label, enabled ? /markers: On.*Click to disable/ : /markers: Off.*Click to enable/);
     assert.equal(status.visible, true);
     assert.equal(h.view.visible, false);
-    assert.equal(h.contexts.get('branchDiff.markersEnabled'), enabled);
+    assert.equal(h.contexts.get('branchDiffy.markersEnabled'), enabled);
     assert.equal(h.state.get('markersEnabled'), enabled);
     assert.equal(!!h.marker(), enabled);
   }
   await h.run('refresh');
-  assert.equal(status.text, '$(eye-closed) Branch Diff: Off');
+  assert.equal(status.text, '$(eye-closed) Branch Diffy: Off');
   assert.equal(h.statusBarItems.length, 1, 'Toggling and refreshing reuse the same status bar item');
 });
 
@@ -1252,16 +1252,16 @@ test('activates after startup so marker status is available without opening the 
 
 test('contributes distinct on/off icons and labels using supported menu conditions', () => {
   const { contributes } = require('../package.json');
-  const on = contributes.commands.find((command) => command.command === 'branchDiff.disableMarkers');
-  const off = contributes.commands.find((command) => command.command === 'branchDiff.enableMarkers');
+  const on = contributes.commands.find((command) => command.command === 'branchDiffy.disableMarkers');
+  const off = contributes.commands.find((command) => command.command === 'branchDiffy.enableMarkers');
   assert.equal(on.icon, '$(eye)');
   assert.match(on.title, /Disable.*Currently On/);
   assert.equal(off.icon, '$(eye-closed)');
   assert.match(off.title, /Enable.*Currently Off/);
   assert.ok(contributes.commands.every((command) => !Object.hasOwn(command, 'toggled')), 'Unsupported toggled metadata must not return');
-  for (const [command, condition] of [[on, 'branchDiff.markersEnabled'], [off, '!branchDiff.markersEnabled']]) {
+  for (const [command, condition] of [[on, 'branchDiffy.markersEnabled'], [off, '!branchDiffy.markersEnabled']]) {
     assert.ok(contributes.menus['view/title'].some((item) => item.command === command.command
-      && item.when === `view == branchDiff.files && ${condition}`));
+      && item.when === `view == branchDiffy.files && ${condition}`));
     assert.ok(contributes.menus.commandPalette.some((item) => item.command === command.command && item.when === condition));
   }
 });
@@ -1275,13 +1275,13 @@ test('explicit on/off actions keep the visible state synchronized and are idempo
   await h.run('enableMarkers');
   assert.equal(h.marker(), first, 'Enabling an already-enabled provider does not recreate it');
   await h.run('disableMarkers');
-  assert.equal(h.contexts.get('branchDiff.markersEnabled'), false);
+  assert.equal(h.contexts.get('branchDiffy.markersEnabled'), false);
   assert.equal(h.marker(), undefined);
   await h.run('disableMarkers');
   assert.equal(h.state.get('markersEnabled'), false, 'A stale toolbar action cannot toggle back on');
   assert.equal(h.marker(), undefined);
   await h.run('enableMarkers');
-  assert.equal(h.contexts.get('branchDiff.markersEnabled'), true);
+  assert.equal(h.contexts.get('branchDiffy.markersEnabled'), true);
   assert.equal(h.state.get('markersEnabled'), true);
   assert.ok(h.marker());
 });
@@ -1316,7 +1316,7 @@ test('removes stale markers when a comparison branch disappears and recovers aft
   assert.equal(h.marker(), undefined);
   h.select((choices) => choices.find((choice) => choice.branch.name === 'feature'));
   await h.run('selectBranch');
-  assert.equal(h.marker().label, 'Branch Diff (feature)');
+  assert.equal(h.marker().label, 'Branch Diffy (feature)');
 });
 
 test('honors cancellation without poisoning the shared original-resource cache', async (t) => {

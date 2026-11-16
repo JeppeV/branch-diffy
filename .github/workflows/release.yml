@@ -38,7 +38,7 @@ jobs:
           cache: npm
       - name: Prepare version and changelog notes
         id: metadata
-        run: node .github/scripts/release-metadata.cjs "$RUNNER_TEMP/branch-diff-release"
+        run: node .github/scripts/release-metadata.cjs "$RUNNER_TEMP/branch-diffy-release"
       - run: npm ci
       - run: npm run check
       - run: npm test
@@ -47,11 +47,11 @@ jobs:
       - name: Build VSIX
         env:
           RELEASE_ASSET: ${{ steps.metadata.outputs.asset }}
-        run: npm run package -- --out "$RUNNER_TEMP/branch-diff-release/$RELEASE_ASSET"
+        run: npm run package -- --out "$RUNNER_TEMP/branch-diffy-release/$RELEASE_ASSET"
       - uses: actions/upload-artifact@v4
         with:
           name: github-release
-          path: ${{ runner.temp }}/branch-diff-release/
+          path: ${{ runner.temp }}/branch-diffy-release/
           if-no-files-found: error
 
   release:

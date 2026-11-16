@@ -1,6 +1,6 @@
 {
-  "name": "branch-diff",
-  "displayName": "Branch Diff",
+  "name": "branch-diffy",
+  "displayName": "Branch Diffy",
   "description": "Compare Git branches with a changed-files sidebar, native gutter markers, and separate unstaged changes.",
   "version": "0.1.0",
   "publisher": "JeppeVinberg",
@@ -13,56 +13,56 @@
   "main": "./dist/extension.js",
   "extensionKind": ["workspace"],
   "extensionDependencies": ["vscode.git"],
-  "activationEvents": ["onStartupFinished", "onView:branchDiff.files"],
+  "activationEvents": ["onStartupFinished", "onView:branchDiffy.files"],
   "capabilities": {
     "virtualWorkspaces": false,
     "untrustedWorkspaces": {
       "supported": false,
-      "description": "Branch Diff runs Git in the workspace to compare branches."
+      "description": "Branch Diffy runs Git in the workspace to compare branches."
     }
   },
   "contributes": {
     "commands": [
-      { "command": "branchDiff.selectBranch", "title": "Select Comparison Branch", "category": "Branch Diff", "icon": "$(git-branch)" },
-      { "command": "branchDiff.selectRepository", "title": "Select Repository", "category": "Branch Diff", "icon": "$(repo)" },
-      { "command": "branchDiff.refresh", "title": "Refresh", "category": "Branch Diff", "icon": "$(refresh)" },
-      { "command": "branchDiff.toggleMarkers", "title": "Toggle Branch Markers", "category": "Branch Diff" },
-      { "command": "branchDiff.enableMarkers", "title": "Enable Branch Markers (Currently Off)", "category": "Branch Diff", "icon": "$(eye-closed)" },
-      { "command": "branchDiff.disableMarkers", "title": "Disable Branch Markers (Currently On)", "category": "Branch Diff", "icon": "$(eye)" },
-      { "command": "branchDiff.openDiff", "title": "Open Diff", "category": "Branch Diff", "icon": "$(diff)" }
+      { "command": "branchDiffy.selectBranch", "title": "Select Comparison Branch", "category": "Branch Diffy", "icon": "$(git-branch)" },
+      { "command": "branchDiffy.selectRepository", "title": "Select Repository", "category": "Branch Diffy", "icon": "$(repo)" },
+      { "command": "branchDiffy.refresh", "title": "Refresh", "category": "Branch Diffy", "icon": "$(refresh)" },
+      { "command": "branchDiffy.toggleMarkers", "title": "Toggle Branch Markers", "category": "Branch Diffy" },
+      { "command": "branchDiffy.enableMarkers", "title": "Enable Branch Markers (Currently Off)", "category": "Branch Diffy", "icon": "$(eye-closed)" },
+      { "command": "branchDiffy.disableMarkers", "title": "Disable Branch Markers (Currently On)", "category": "Branch Diffy", "icon": "$(eye)" },
+      { "command": "branchDiffy.openDiff", "title": "Open Diff", "category": "Branch Diffy", "icon": "$(diff)" }
     ],
     "viewsContainers": {
       "activitybar": [
-        { "id": "branchDiff", "title": "Branch Diff", "icon": "media/branch-diff.svg" }
+        { "id": "branchDiffy", "title": "Branch Diffy", "icon": "media/branch-diffy.svg" }
       ]
     },
     "views": {
-      "branchDiff": [
-        { "id": "branchDiff.files", "name": "Changed Files", "contextualTitle": "Branch Diff" }
+      "branchDiffy": [
+        { "id": "branchDiffy.files", "name": "Changed Files", "contextualTitle": "Branch Diffy" }
       ]
     },
     "menus": {
       "view/title": [
-        { "command": "branchDiff.selectBranch", "when": "view == branchDiff.files", "group": "navigation@1" },
-        { "command": "branchDiff.selectRepository", "when": "view == branchDiff.files && branchDiff.repositoryCount > 1", "group": "navigation@2" },
-        { "command": "branchDiff.disableMarkers", "when": "view == branchDiff.files && branchDiff.markersEnabled", "group": "navigation@3" },
-        { "command": "branchDiff.enableMarkers", "when": "view == branchDiff.files && !branchDiff.markersEnabled", "group": "navigation@3" },
-        { "command": "branchDiff.refresh", "when": "view == branchDiff.files", "group": "navigation@4" }
+        { "command": "branchDiffy.selectBranch", "when": "view == branchDiffy.files", "group": "navigation@1" },
+        { "command": "branchDiffy.selectRepository", "when": "view == branchDiffy.files && branchDiffy.repositoryCount > 1", "group": "navigation@2" },
+        { "command": "branchDiffy.disableMarkers", "when": "view == branchDiffy.files && branchDiffy.markersEnabled", "group": "navigation@3" },
+        { "command": "branchDiffy.enableMarkers", "when": "view == branchDiffy.files && !branchDiffy.markersEnabled", "group": "navigation@3" },
+        { "command": "branchDiffy.refresh", "when": "view == branchDiffy.files", "group": "navigation@4" }
       ],
       "view/item/context": [
-        { "command": "branchDiff.openDiff", "when": "view == branchDiff.files && viewItem == branchDiff.change", "group": "inline" }
+        { "command": "branchDiffy.openDiff", "when": "view == branchDiffy.files && viewItem == branchDiffy.change", "group": "inline" }
       ],
       "commandPalette": [
-        { "command": "branchDiff.openDiff", "when": "false" },
-        { "command": "branchDiff.toggleMarkers", "when": "false" },
-        { "command": "branchDiff.disableMarkers", "when": "branchDiff.markersEnabled" },
-        { "command": "branchDiff.enableMarkers", "when": "!branchDiff.markersEnabled" }
+        { "command": "branchDiffy.openDiff", "when": "false" },
+        { "command": "branchDiffy.toggleMarkers", "when": "false" },
+        { "command": "branchDiffy.disableMarkers", "when": "branchDiffy.markersEnabled" },
+        { "command": "branchDiffy.enableMarkers", "when": "!branchDiffy.markersEnabled" }
       ]
     },
     "configuration": {
-      "title": "Branch Diff",
+      "title": "Branch Diffy",
       "properties": {
-        "branchDiff.defaultBaseBranch": {
+        "branchDiffy.defaultBaseBranch": {
           "type": "string",
           "default": "main",
           "minLength": 1,

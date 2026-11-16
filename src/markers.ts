@@ -77,7 +77,7 @@ export class BranchMarkers implements vscode.Disposable {
 
     const changes = new Map(baseline.changes.map((change) => [change.path, change]));
     const originals = new Map<string, Promise<vscode.Uri | undefined>>();
-    const sourceControl = vscode.scm.createSourceControl('branchDiff', `Branch Diff (${baseline.baseName})`, baseline.root);
+    const sourceControl = vscode.scm.createSourceControl('branchDiffy', `Branch Diffy (${baseline.baseName})`, baseline.root);
     this.sourceControl = sourceControl;
     sourceControl.inputBox.visible = false;
     sourceControl.count = 0;

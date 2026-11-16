@@ -7,8 +7,8 @@ const manifest = require('../package.json');
 const { indexSnapshotUri, snapshotUri } = require('../dist/snapshots');
 
 async function workbench(expression) {
-  const { stdout } = await promisify(execFile)(process.env.BRANCH_DIFF_TEST_NODE, [
-    path.join(__dirname, 'vscode-renderer.cjs'), process.env.BRANCH_DIFF_TEST_DEBUG_PORT, expression,
+  const { stdout } = await promisify(execFile)(process.env.BRANCH_DIFFY_TEST_NODE, [
+    path.join(__dirname, 'vscode-renderer.cjs'), process.env.BRANCH_DIFFY_TEST_DEBUG_PORT, expression,
   ], { windowsHide: true, timeout: 10000 });
   return JSON.parse(stdout);
 }
@@ -27,40 +27,40 @@ async function waitFor(check, message) {
 }
 
 async function run() {
-  const root = vscode.Uri.file(process.env.BRANCH_DIFF_TEST_ROOT);
+  const root = vscode.Uri.file(process.env.BRANCH_DIFFY_TEST_ROOT);
   const git = (await vscode.extensions.getExtension('vscode.git').activate()).getAPI(1);
   await waitFor(() => git.repositories.some((repo) => repo.state.HEAD?.name === 'feature'), 'Git discovers the test repository');
   const extension = vscode.extensions.getExtension(`${manifest.publisher}.${manifest.name}`);
   assert.ok(extension, 'Development extension was discovered');
-  await waitFor(() => extension.isActive, 'Branch Diff activates after startup without opening its sidebar');
+  await waitFor(() => extension.isActive, 'Branch Diffy activates after startup without opening its sidebar');
   const statusShown = (enabled) => workbench(`(() => {
-    const item = [...document.querySelectorAll('.statusbar-item')].find(item => item.textContent.includes('Branch Diff:'));
+    const item = [...document.querySelectorAll('.statusbar-item')].find(item => item.textContent.includes('Branch Diffy:'));
     return !!item && item.getClientRects().length > 0
-      && item.textContent.includes(${JSON.stringify(`Branch Diff: ${enabled ? 'On' : 'Off'}`)})
+      && item.textContent.includes(${JSON.stringify(`Branch Diffy: ${enabled ? 'On' : 'Off'}`)})
       && !!item.querySelector(${JSON.stringify(`.codicon-${enabled ? 'eye' : 'eye-closed'}`)});
   })()`);
   const clickStatus = () => workbench(`(() => {
-    const item = [...document.querySelectorAll('.statusbar-item')].find(item => item.textContent.includes('Branch Diff:'));
+    const item = [...document.querySelectorAll('.statusbar-item')].find(item => item.textContent.includes('Branch Diffy:'));
     item.querySelector('a').click();
     return true;
   })()`);
-  await waitFor(() => statusShown(true), 'The status bar shows markers On before the Branch Diff sidebar is opened');
+  await waitFor(() => statusShown(true), 'The status bar shows markers On before the Branch Diffy sidebar is opened');
   await clickStatus();
   await waitFor(() => statusShown(false), 'Clicking the status bar turns markers Off without opening the sidebar');
   await clickStatus();
   await waitFor(() => statusShown(true), 'Clicking again turns markers On');
-  await vscode.commands.executeCommand('branchDiff.files.focus');
-  await vscode.commands.executeCommand('branchDiff.refresh');
+  await vscode.commands.executeCommand('branchDiffy.files.focus');
+  await vscode.commands.executeCommand('branchDiffy.refresh');
 
   const commands = await vscode.commands.getCommands(true);
   for (const command of ['refresh', 'selectBranch', 'selectRepository', 'openFile', 'openDiff', 'toggleMarkers', 'enableMarkers', 'disableMarkers']) {
-    assert.ok(commands.includes(`branchDiff.${command}`), `${command} is registered`);
+    assert.ok(commands.includes(`branchDiffy.${command}`), `${command} is registered`);
   }
-  assert.equal(vscode.workspace.getConfiguration('branchDiff').get('defaultBaseBranch'), 'main');
-  assert.equal(vscode.workspace.fs.isWritableFileSystem('branch-diff-snapshot'), false);
+  assert.equal(vscode.workspace.getConfiguration('branchDiffy').get('defaultBaseBranch'), 'main');
+  assert.equal(vscode.workspace.fs.isWritableFileSystem('branch-diffy-snapshot'), false);
 
-  const base = process.env.BRANCH_DIFF_TEST_BASE;
-  const head = process.env.BRANCH_DIFF_TEST_HEAD;
+  const base = process.env.BRANCH_DIFFY_TEST_BASE;
+  const head = process.env.BRANCH_DIFFY_TEST_HEAD;
   const deleted = snapshotUri(root, base, 'deleted.txt');
   const left = snapshotUri(root, base, 'modified.txt');
   const right = snapshotUri(root, head, 'modified.txt');
@@ -76,7 +76,7 @@ async function run() {
         return true;
       }
       // View focus and file opening settle asynchronously, so retry the full interaction.
-      await vscode.commands.executeCommand('branchDiff.files.focus');
+      await vscode.commands.executeCommand('branchDiffy.files.focus');
       await vscode.commands.executeCommand('list.focusFirst');
       if (collapseFirst) {
         await vscode.commands.executeCommand('list.collapse');
@@ -131,7 +131,7 @@ async function run() {
   }, 'Unstaged tracked diffs compare the staged index against the working copy');
   execFileSync(git.git.path, ['add', 'local-modified.txt'], { cwd: root.fsPath, windowsHide: true });
   await git.repositories.find((repo) => repo.rootUri.toString() === root.toString()).status();
-  await vscode.commands.executeCommand('branchDiff.refresh');
+  await vscode.commands.executeCommand('branchDiffy.refresh');
   await waitFor(() => vscode.workspace.textDocuments.some((document) => document.uri.toString() === index.toString()
     && document.getText() === 'working local version\n'),
   'An already-open index baseline updates after staging without pinning an old commit');
@@ -142,7 +142,7 @@ async function run() {
   execFileSync(git.git.path, ['add', 'index-binary.bin'], { cwd: root.fsPath, windowsHide: true });
   assert.deepEqual(Buffer.from(await vscode.workspace.fs.readFile(indexSnapshotUri(root, 'index-binary.bin'))), bytes);
 
-  await vscode.commands.executeCommand('vscode.diff', left, right, 'Branch Diff smoke test');
+  await vscode.commands.executeCommand('vscode.diff', left, right, 'Branch Diffy smoke test');
   await waitFor(() => vscode.window.activeTextEditor?.document.getText() === 'unchanged first\nafter\nunchanged third\nunchanged fourth\n',
     'Committed diffs open the historical HEAD snapshot');
   await vscode.commands.executeCommand('workbench.action.closeAllEditors');
@@ -222,9 +222,9 @@ async function run() {
   }, 'Branch status letters and both ancestor folder colors/indicators match native unstaged Git decorations');
   const enabledColors = await explorerColors();
   const enabledBadges = await explorerBadges();
-  await waitFor(() => statusShown(true), 'Marker status remains visible while Explorer replaces the Branch Diff sidebar');
+  await waitFor(() => statusShown(true), 'Marker status remains visible while Explorer replaces the Branch Diffy sidebar');
   await clickStatus();
-  await waitFor(() => statusShown(false), 'The status bar toggles markers Off while Branch Diff is hidden');
+  await waitFor(() => statusShown(false), 'The status bar toggles markers Off while Branch Diffy is hidden');
   await waitFor(async () => {
     const colors = await explorerColors();
     return colors['modified.txt'] !== enabledColors['modified.txt']
@@ -241,13 +241,13 @@ async function run() {
         'z-branch-deletions', 'z-native-deletions'].every(name =>
         JSON.stringify(badges[name]) === JSON.stringify(enabledBadges[name]));
   }, 'Disabling markers clears branch badges and both ancestor decorations without affecting native Git');
-  await vscode.commands.executeCommand('branchDiff.enableMarkers');
+  await vscode.commands.executeCommand('branchDiffy.enableMarkers');
   await waitFor(() => statusShown(true), 'The status bar reflects markers enabled through a command');
   await waitFor(async () => {
     const colors = await explorerColors();
     return colors['modified.txt'] === enabledColors['modified.txt']
       && colors['z-added-no-eol.txt'] === enabledColors['z-added-no-eol.txt'];
-  }, 'Enabling markers restores Explorer coloring while the Branch Diff sidebar is closed');
+  }, 'Enabling markers restores Explorer coloring while the Branch Diffy sidebar is closed');
   await waitFor(async () => JSON.stringify(await explorerBadges()) === JSON.stringify(enabledBadges),
     'Enabling markers restores branch status letters and all inherited folder decorations');
 
@@ -269,7 +269,7 @@ async function run() {
   await nextChange(0, 1);
 
   const branchOriginal = () => vscode.workspace.textDocuments.find((document) => {
-    if (document.uri.scheme !== 'branch-diff-snapshot') {
+    if (document.uri.scheme !== 'branch-diffy-snapshot') {
       return false;
     }
     const snapshot = JSON.parse(document.uri.query);
@@ -280,32 +280,32 @@ async function run() {
     'The native branch baseline absorbs an adjacent unsaved addition');
   await nextChange(0, 1);
   await nextChange(1, 2);
-  await vscode.commands.executeCommand('branchDiff.disableMarkers');
+  await vscode.commands.executeCommand('branchDiffy.disableMarkers');
   await waitFor(() => statusShown(false), 'The status bar reflects markers disabled through a command');
   await nextChange(0, 2);
-  await vscode.commands.executeCommand('branchDiff.enableMarkers');
+  await vscode.commands.executeCommand('branchDiffy.enableMarkers');
   await nextChange(0, 1);
   await editor.document.save();
   await git.repositories.find((repo) => repo.rootUri.toString() === root.toString()).status();
-  await vscode.commands.executeCommand('branchDiff.refresh');
+  await vscode.commands.executeCommand('branchDiffy.refresh');
   await waitFor(() => branchOriginal()?.getText() === 'unchanged first\nbefore\nlocal addition\nunchanged third\nunchanged fourth\n',
     'Saving keeps the native branch baseline adjusted for the now-saved unstaged addition');
   await nextChange(1, 2);
   execFileSync(git.git.path, ['add', 'modified.txt'], { cwd: root.fsPath, windowsHide: true });
   await git.repositories.find((repo) => repo.rootUri.toString() === root.toString()).status();
-  await vscode.commands.executeCommand('branchDiff.refresh');
+  await vscode.commands.executeCommand('branchDiffy.refresh');
   await waitFor(() => branchOriginal()?.getText() === 'unchanged first\nbefore\nunchanged third\nunchanged fourth\n',
     'Staging makes the added line part of the native branch comparison again');
   execFileSync(git.git.path, ['reset', 'HEAD', '--', 'modified.txt'], { cwd: root.fsPath, windowsHide: true });
   await git.repositories.find((repo) => repo.rootUri.toString() === root.toString()).status();
-  await vscode.commands.executeCommand('branchDiff.refresh');
+  await vscode.commands.executeCommand('branchDiffy.refresh');
   await waitFor(() => branchOriginal()?.getText() === 'unchanged first\nbefore\nlocal addition\nunchanged third\nunchanged fourth\n',
     'Unstaging restores the adjusted native baseline without reopening the editor');
   await nextChange(1, 2);
   await editor.edit((edit) => edit.delete(new vscode.Range(2, 0, 3, 0)));
   await editor.document.save();
   await git.repositories.find((repo) => repo.rootUri.toString() === root.toString()).status();
-  await vscode.commands.executeCommand('branchDiff.refresh');
+  await vscode.commands.executeCommand('branchDiffy.refresh');
   await waitFor(() => branchOriginal()?.getText() === 'unchanged first\nbefore\nunchanged third\nunchanged fourth\n',
     'Removing the local addition restores the original branch baseline in the open editor');
 
@@ -320,7 +320,7 @@ async function run() {
       if (saved) {
         await editor.document.save();
         await git.repositories.find((repo) => repo.rootUri.toString() === root.toString()).status();
-        await vscode.commands.executeCommand('branchDiff.refresh');
+        await vscode.commands.executeCommand('branchDiffy.refresh');
       }
       const state = `${name}, ${saved ? 'saved' : 'unsaved'}`;
       editor.selection = new vscode.Selection(anchor, 0, anchor, 0);
@@ -333,7 +333,7 @@ async function run() {
           const select = dropdown?.querySelector('select');
           return !!dropdown && getComputedStyle(dropdown).display !== 'none'
             && !!select && [...select.options].some(option => option.text === 'Git local working changes')
-            && [...select.options].some(option => option.text === 'Branch Diff (main)')
+            && [...select.options].some(option => option.text === 'Branch Diffy (main)')
             && select.value === 'Git local working changes';
         })()`);
       }, `${state}: the native inline preview offers both providers and prefers the updated local Git change`);
@@ -341,7 +341,7 @@ async function run() {
         'Git local working changes', `${state}: opening the shared anchor still prefers local Git`);
       assert.equal(await workbench(`!!document.querySelector('.margin-view-overlays .dirty-diff-deleted')`),
         true, `${state}: native Git still paints its deletion marker`);
-      for (const [provider, showsBranch] of [['Branch Diff (main)', true], ['Git local working changes', false]]) {
+      for (const [provider, showsBranch] of [['Branch Diffy (main)', true], ['Git local working changes', false]]) {
         await workbench(`(() => {
           const select = document.querySelector('.dirty-diff .dropdown select');
           select.value = ${JSON.stringify(provider)};
@@ -357,7 +357,7 @@ async function run() {
     await vscode.commands.executeCommand('undo');
     await editor.document.save();
     await git.repositories.find((repo) => repo.rootUri.toString() === root.toString()).status();
-    await vscode.commands.executeCommand('branchDiff.refresh');
+    await vscode.commands.executeCommand('branchDiffy.refresh');
     await waitFor(() => branchOriginal()?.getText() === 'unchanged first\nbefore\nunchanged third\nunchanged fourth\n',
       `${name}: undoing the deletion restores the original branch baseline`);
   }
@@ -370,10 +370,10 @@ async function run() {
 
   // Moving the same branch ref must invalidate the old baseline in already-open editors.
   execFileSync(git.git.path, ['update-ref', 'refs/heads/main', head], { cwd: root.fsPath, windowsHide: true });
-  await vscode.commands.executeCommand('branchDiff.refresh');
+  await vscode.commands.executeCommand('branchDiffy.refresh');
   await nextChange(0, 0);
   execFileSync(git.git.path, ['update-ref', 'refs/heads/main', base], { cwd: root.fsPath, windowsHide: true });
-  await vscode.commands.executeCommand('branchDiff.refresh');
+  await vscode.commands.executeCommand('branchDiffy.refresh');
   await nextChange(0, 1);
   // Case 9: appending must keep the committed addition separate from the local addition,
   // including a one-line file created without a trailing newline.
@@ -386,7 +386,7 @@ async function run() {
       if (saved) {
         await addedEditor.document.save();
         await git.repositories.find((repo) => repo.rootUri.toString() === root.toString()).status();
-        await vscode.commands.executeCommand('branchDiff.refresh');
+        await vscode.commands.executeCommand('branchDiffy.refresh');
       }
       const state = `case 9, ${file}, ${saved ? 'saved' : 'unsaved'}`;
       await waitFor(async () => {
@@ -402,7 +402,7 @@ async function run() {
     }
   }
   await vscode.commands.executeCommand('workbench.action.closeAllEditors');
-  console.log('Branch Diff: VS Code extension-host smoke test passed.');
+  console.log('Branch Diffy: VS Code extension-host smoke test passed.');
 }
 
 module.exports = { run };

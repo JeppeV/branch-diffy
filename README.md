@@ -1,4 +1,4 @@
-# Branch Diff
+# Branch Diffy
 
 A VS Code sidebar for files changed between your checked-out branch and another branch, defaulting to `main`.
 
@@ -11,7 +11,7 @@ Supports local folders and remote extension hosts (WSL, SSH, and Dev Containers)
 
 ## Use
 
-1. Open a Git repository and select **Branch Diff** in the left Activity Bar.
+1. Open a Git repository and select **Branch Diffy** in the left Activity Bar.
 2. Use the **Select Comparison Branch** (branch) button to choose a local or remote-tracking branch.
 3. The view has collapsible **Committed changes** and **Unstaged changes** sections. Files show native, theme-aware Git-style badges: **A** added, **M** modified, **D** deleted, **R** renamed, **C** copied, **T** type changed, **U** untracked, or **!** conflicted. The unstaged section is hidden when empty.
 4. Click a file to open it. Committed deletions open a read-only version from the comparison branch; unstaged deletions open the index (staged) version. Committed files missing from your working directory open the committed version instead; unexpectedly missing working files report an error.
@@ -21,17 +21,17 @@ The view refreshes when Git reports repository changes, when it becomes visible,
 
 ### Native editor markers
 
-Branch Diff starts automatically after VS Code finishes starting, without needing to open its sidebar, and enables native, theme-aware gutter markers for the selected repository: green for added lines, blue for modified lines, and red for deleted lines. Click a marker to see VS Code's inline change preview. Renamed files compare against their original path on the comparison branch.
+Branch Diffy starts automatically after VS Code finishes starting, without needing to open its sidebar, and enables native, theme-aware gutter markers for the selected repository: green for added lines, blue for modified lines, and red for deleted lines. Click a marker to see VS Code's inline change preview. Renamed files compare against their original path on the comparison branch.
 
 Branch markers show changes from the selected branch to the **index**, mapped into the live editor. Unstaged and unsaved edits are incorporated into a synthetic, read-only branch baseline so the built-in Git provider can mark those edits normally. For example, a committed modification followed by an unstaged added line keeps a blue branch marker on the modification and Git's green marker on the addition. Local edits take precedence on overlapping lines; an independent branch edit sharing a local deletion's gutter anchor remains accessible through the inline preview's comparison dropdown. Staged changes remain part of the branch comparison. This does not modify files, commits, or the index.
 
 The branch marker's inline preview uses this **adjusted baseline**, not necessarily the exact comparison-branch contents. The **Committed changes** section and its **Open Diff** action remain committed-only and unadjusted; the separate **Unstaged changes** section shows local changes relative to the index. Entirely deleted files are still viewed through the sidebar or **Open Diff**, since they have no working-copy editor to mark. Very large or expensive text comparisons yield to native Git markers for that file; binary baselines remain byte-preserving.
 
-The status bar shows **Branch Diff: On** with an open eye or **Branch Diff: Off** with a crossed-out eye. Click it to toggle markers, even when the Branch Diff sidebar is closed. The view-title button uses the same eye icons; hover either control to see the current state and what clicking will do. The Command Palette likewise shows **Branch Diff: Disable Branch Markers (Currently On)** or **Branch Diff: Enable Branch Markers (Currently Off)**. Markers are on by default; the toggle is remembered for this workspace. Switching branches or repositories updates the baseline automatically. The `branchDiff.toggleMarkers` command remains available for custom keybindings.
+The status bar shows **Branch Diffy: On** with an open eye or **Branch Diffy: Off** with a crossed-out eye. Click it to toggle markers, even when the Branch Diffy sidebar is closed. The view-title button uses the same eye icons; hover either control to see the current state and what clicking will do. The Command Palette likewise shows **Branch Diffy: Disable Branch Markers (Currently On)** or **Branch Diffy: Enable Branch Markers (Currently Off)**. Markers are on by default; the toggle is remembered for this workspace. Switching branches or repositories updates the baseline automatically. The `branchDiffy.toggleMarkers` command remains available for custom keybindings.
 
 While branch markers are enabled, files in the selected repository's **Committed changes** section also show Git-style status letters (such as **M** for modified) and theme-aware status colors in Explorer. These decorations propagate to parent folders using VS Code's native Git-style folder highlighting and change indicators, except for deletions, which do not decorate parent folders. Turning markers off removes the branch colors, badges, and folder indicators without changing the sidebar's status badges or native Git decorations. Local-only changes and files belonging to nested repositories are not branch-decorated.
 
-Native integration adds a separate **Branch Diff (branch-name)** provider in Source Control, with its commit input hidden. It does not replace the built-in Git provider, change Git settings, or inflate the Source Control change count. If a change preview offers multiple baselines, choose **Branch Diff (branch-name)** for the branch comparison. Markers follow VS Code's `scm.diffDecorations` setting; use `all` or `gutter` to show them beside line numbers. VS Code may suppress gutter marks for entirely new untracked files with empty baselines.
+Native integration adds a separate **Branch Diffy (branch-name)** provider in Source Control, with its commit input hidden. It does not replace the built-in Git provider, change Git settings, or inflate the Source Control change count. If a change preview offers multiple baselines, choose **Branch Diffy (branch-name)** for the branch comparison. Markers follow VS Code's `scm.diffDecorations` setting; use `all` or `gutter` to show them beside line numbers. VS Code may suppress gutter marks for entirely new untracked files with empty baselines.
 
 ### What is compared?
 
@@ -47,7 +47,7 @@ Remote branches use already-fetched local references; the extension never fetche
 
 ```json
 {
-  "branchDiff.defaultBaseBranch": "main"
+  "branchDiffy.defaultBaseBranch": "main"
 }
 ```
 
@@ -77,7 +77,7 @@ On Windows PowerShell, use `npm.cmd` instead of `npm` if script execution is res
 
 ```sh
 npm run package
-code --install-extension branch-diff-0.1.0.vsix
+code --install-extension branch-diffy-0.1.0.vsix
 ```
 
 Alternatively use **Extensions: Install from VSIX…** in VS Code. Packaging does not publish the extension.

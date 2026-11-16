@@ -6,13 +6,13 @@ const path = require('node:path');
 const { test } = require('node:test');
 const { releaseMetadata } = require('../.github/scripts/release-metadata.cjs');
 
-const manifest = { name: 'branch-diff', displayName: 'Branch Diff', version: '0.2.0' };
+const manifest = { name: 'branch-diffy', displayName: 'Branch Diffy', version: '0.2.0' };
 const lock = { version: '0.2.0', packages: { '': { version: '0.2.0' } } };
 
 test('uses only the selected version changelog section as release notes', () => {
   const changelog = '# Changelog\n\n## Unreleased\n\nFuture work.\n\n## 0.2.0 - 2026-11-16\n\nNew features.\n\n### Fixed\n\n- A fix.\n\n## 0.1.0\n\nOld notes.\n';
   assert.deepEqual(releaseMetadata(manifest, lock, changelog), {
-    tag: 'v0.2.0', title: 'Branch Diff 0.2.0', asset: 'branch-diff-0.2.0.vsix',
+    tag: 'v0.2.0', title: 'Branch Diffy 0.2.0', asset: 'branch-diffy-0.2.0.vsix',
     notes: 'New features.\n\n### Fixed\n\n- A fix.',
   });
 });
@@ -39,7 +39,7 @@ test('rejects invalid versions and unsafe release output names', () => {
   for (const version of ['v0.2.0', '01.2.0', '0.2.0-beta.1', '0.2.0\n', '0.2.0\nasset=other', undefined]) {
     assert.throws(() => releaseMetadata({ ...manifest, version }, lock, ''), /major.minor.patch/);
   }
-  for (const change of [{ name: '../other' }, { name: 'branch-diff\n' }, { displayName: 'Title\nasset=other' }, { displayName: '' }]) {
+  for (const change of [{ name: '../other' }, { name: 'branch-diffy\n' }, { displayName: 'Title\nasset=other' }, { displayName: '' }]) {
     assert.throws(() => releaseMetadata({ ...manifest, ...change }, lock, ''), /Invalid extension name/);
   }
 });
@@ -47,7 +47,7 @@ test('rejects invalid versions and unsafe release output names', () => {
 test('writes workflow outputs and current release notes without modifying the repository', (t) => {
   const parent = path.join(os.tmpdir(), 'opencode');
   fs.mkdirSync(parent, { recursive: true });
-  const directory = fs.mkdtempSync(path.join(parent, 'branch-diff-release-'));
+  const directory = fs.mkdtempSync(path.join(parent, 'branch-diffy-release-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
   const output = path.join(directory, 'github-output');
   const root = path.resolve(__dirname, '..');

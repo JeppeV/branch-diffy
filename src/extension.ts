@@ -9,7 +9,7 @@ import { statusInfo } from './status';
 
 type Section = 'committed' | 'unstaged';
 
-const statusScheme = 'branch-diff-status';
+const statusScheme = 'branch-diffy-status';
 
 class ChangeItem extends vscode.TreeItem {
   constructor(
@@ -23,7 +23,7 @@ class ChangeItem extends vscode.TreeItem {
   ) {
     super(path.posix.basename(change.path), vscode.TreeItemCollapsibleState.None);
     this.id = `${root.toString()}:${section}:${change.path}`;
-    this.contextValue = 'branchDiff.change';
+    this.contextValue = 'branchDiffy.change';
     // Use a dedicated URI so branch badges cannot override normal Explorer/SCM decorations.
     this.resourceUri = vscode.Uri.from({ scheme: statusScheme, path: `/${change.path}`, query: change.status });
     this.iconPath = vscode.ThemeIcon.File;
@@ -32,7 +32,7 @@ class ChangeItem extends vscode.TreeItem {
     const comparison = section === 'unstaged' ? 'Index → Working tree (unstaged)' : `${baseName} → ${headName}`;
     this.tooltip = `${change.path}\n${name}${change.originalPath ? ` from ${change.originalPath}` : ''}\n${comparison}`;
     this.accessibilityInformation = { label: `${change.path}, ${name}` };
-    this.command = { command: 'branchDiff.openFile', title: 'Open File', arguments: [this] };
+    this.command = { command: 'branchDiffy.openFile', title: 'Open File', arguments: [this] };
   }
 }
 
@@ -59,7 +59,7 @@ class SectionItem extends vscode.TreeItem {
 
 type Item = SectionItem | ChangeItem | MessageItem;
 
-class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable {
+class BranchDiffyView implements vscode.TreeDataProvider<Item>, vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<Item | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
   private readonly disposables: vscode.Disposable[] = [];
@@ -81,14 +81,14 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
     private readonly snapshots: SnapshotFileSystem,
     private readonly output: vscode.OutputChannel,
   ) {
-    this.view = vscode.window.createTreeView('branchDiff.files', { treeDataProvider: this, showCollapseAll: false });
+    this.view = vscode.window.createTreeView('branchDiffy.files', { treeDataProvider: this, showCollapseAll: false });
     this.markers = new BranchMarkers(git, output, context.workspaceState.get<boolean>('markersEnabled') ?? true);
     this.explorerDecorations = new BranchFileDecorations(this.markers.enabled);
-    this.markersStatus = vscode.window.createStatusBarItem('branchDiff.markers', vscode.StatusBarAlignment.Left, 99);
-    this.markersStatus.name = 'Branch Diff Markers';
-    this.markersStatus.command = 'branchDiff.toggleMarkers';
+    this.markersStatus = vscode.window.createStatusBarItem('branchDiffy.markers', vscode.StatusBarAlignment.Left, 99);
+    this.markersStatus.name = 'Branch Diffy Markers';
+    this.markersStatus.command = 'branchDiffy.toggleMarkers';
     this.updateMarkersStatus();
-    void vscode.commands.executeCommand('setContext', 'branchDiff.markersEnabled', this.markers.enabled);
+    void vscode.commands.executeCommand('setContext', 'branchDiffy.markersEnabled', this.markers.enabled);
     this.disposables.push(
       this.view,
       this.markers,
@@ -98,7 +98,7 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
       api.onDidOpenRepository(() => this.repositoriesChanged()),
       api.onDidCloseRepository(() => this.repositoriesChanged()),
       vscode.workspace.onDidChangeConfiguration((event) => {
-        if (event.affectsConfiguration('branchDiff.defaultBaseBranch')) {
+        if (event.affectsConfiguration('branchDiffy.defaultBaseBranch')) {
           this.scheduleRefresh();
         }
       }),
@@ -107,14 +107,14 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
           this.scheduleRefresh();
         }
       }),
-      vscode.commands.registerCommand('branchDiff.refresh', () => this.refresh()),
-      vscode.commands.registerCommand('branchDiff.selectBranch', () => this.selectBranch()),
-      vscode.commands.registerCommand('branchDiff.selectRepository', () => this.selectRepository()),
-      vscode.commands.registerCommand('branchDiff.toggleMarkers', () => this.setMarkersEnabled(!this.markers.enabled)),
-      vscode.commands.registerCommand('branchDiff.enableMarkers', () => this.setMarkersEnabled(true)),
-      vscode.commands.registerCommand('branchDiff.disableMarkers', () => this.setMarkersEnabled(false)),
-      vscode.commands.registerCommand('branchDiff.openFile', (item: ChangeItem) => this.openFile(item)),
-      vscode.commands.registerCommand('branchDiff.openDiff', (item: ChangeItem) => this.openDiff(item)),
+      vscode.commands.registerCommand('branchDiffy.refresh', () => this.refresh()),
+      vscode.commands.registerCommand('branchDiffy.selectBranch', () => this.selectBranch()),
+      vscode.commands.registerCommand('branchDiffy.selectRepository', () => this.selectRepository()),
+      vscode.commands.registerCommand('branchDiffy.toggleMarkers', () => this.setMarkersEnabled(!this.markers.enabled)),
+      vscode.commands.registerCommand('branchDiffy.enableMarkers', () => this.setMarkersEnabled(true)),
+      vscode.commands.registerCommand('branchDiffy.disableMarkers', () => this.setMarkersEnabled(false)),
+      vscode.commands.registerCommand('branchDiffy.openFile', (item: ChangeItem) => this.openFile(item)),
+      vscode.commands.registerCommand('branchDiffy.openDiff', (item: ChangeItem) => this.openDiff(item)),
     );
     this.markersStatus.show();
     this.repositoriesChanged();
@@ -133,7 +133,7 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
 
   private repositoriesChanged(): void {
     const repositories = this.api.repositories.filter((repo) => repo.rootUri.scheme === 'file');
-    void vscode.commands.executeCommand('setContext', 'branchDiff.repositoryCount', repositories.length);
+    void vscode.commands.executeCommand('setContext', 'branchDiffy.repositoryCount', repositories.length);
     for (const [repository, listener] of this.repositoryListeners) {
       if (!repositories.includes(repository)) {
         listener.dispose();
@@ -158,7 +158,7 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
 
   private baseBranch(repository: Repository): string {
     return this.context.workspaceState.get<string>(`baseBranch:${repository.rootUri.toString()}`)
-      ?? vscode.workspace.getConfiguration('branchDiff', repository.rootUri).get<string>('defaultBaseBranch', 'main');
+      ?? vscode.workspace.getConfiguration('branchDiffy', repository.rootUri).get<string>('defaultBaseBranch', 'main');
   }
 
   private scheduleRefresh(): void {
@@ -256,7 +256,7 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
         const noHead = error.reference === 'HEAD';
         this.setItems([new MessageItem(
           noHead ? 'Create a commit before comparing branches.' : `Branch “${baseName}” not found. Select a comparison branch…`,
-          noHead ? undefined : { command: 'branchDiff.selectBranch', title: 'Select Comparison Branch' },
+          noHead ? undefined : { command: 'branchDiffy.selectBranch', title: 'Select Comparison Branch' },
           true,
         )]);
       } else {
@@ -271,16 +271,16 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
     const enabled = this.markers.enabled;
     const state = enabled ? 'On' : 'Off';
     const action = enabled ? 'disable' : 'enable';
-    this.markersStatus.text = `$(${enabled ? 'eye' : 'eye-closed'}) Branch Diff: ${state}`;
-    this.markersStatus.tooltip = `Branch diff markers are ${state.toLowerCase()}. Click to ${action}.`;
-    this.markersStatus.accessibilityInformation = { label: `Branch Diff markers: ${state}. Click to ${action}.` };
+    this.markersStatus.text = `$(${enabled ? 'eye' : 'eye-closed'}) Branch Diffy: ${state}`;
+    this.markersStatus.tooltip = `Branch Diffy markers are ${state.toLowerCase()}. Click to ${action}.`;
+    this.markersStatus.accessibilityInformation = { label: `Branch Diffy markers: ${state}. Click to ${action}.` };
   }
 
   private async setMarkersEnabled(enabled: boolean): Promise<void> {
     this.markers.setEnabled(enabled);
     this.explorerDecorations.setEnabled(enabled);
     this.updateMarkersStatus();
-    await vscode.commands.executeCommand('setContext', 'branchDiff.markersEnabled', enabled);
+    await vscode.commands.executeCommand('setContext', 'branchDiffy.markersEnabled', enabled);
     await this.context.workspaceState.update('markersEnabled', enabled);
   }
 
@@ -299,7 +299,7 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
         branch,
       }));
       const selected = await vscode.window.showQuickPick(choices, {
-        title: 'Branch Diff: Select Comparison Branch',
+        title: 'Branch Diffy: Select Comparison Branch',
         placeHolder: 'Compare the checked-out branch against…',
         matchOnDescription: true,
       });
@@ -318,7 +318,7 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
       description: repository.rootUri.fsPath,
       repository,
     }));
-    const selected = await vscode.window.showQuickPick(choices, { title: 'Branch Diff: Select Repository' });
+    const selected = await vscode.window.showQuickPick(choices, { title: 'Branch Diffy: Select Repository' });
     if (selected && !this.disposed && this.api.repositories.includes(selected.repository)) {
       this.repository = selected.repository;
       await this.context.workspaceState.update('selectedRepository', this.repository.rootUri.toString());
@@ -389,7 +389,7 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
   private showError(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
     this.output.appendLine(message);
-    void vscode.window.showErrorMessage(`Branch Diff: ${message}`);
+    void vscode.window.showErrorMessage(`Branch Diffy: ${message}`);
   }
 
   dispose(): void {
@@ -406,13 +406,13 @@ class BranchDiffView implements vscode.TreeDataProvider<Item>, vscode.Disposable
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  const output = vscode.window.createOutputChannel('Branch Diff');
+  const output = vscode.window.createOutputChannel('Branch Diffy');
   context.subscriptions.push(output);
   try {
     const extension = vscode.extensions.getExtension<GitExtension>('vscode.git');
     const exports = await extension?.activate();
     if (!exports?.enabled) {
-      throw new Error('Enable the built-in Git extension to use Branch Diff.');
+      throw new Error('Enable the built-in Git extension to use Branch Diffy.');
     }
     const api = exports.getAPI(1);
     const git = new Git(api.git.path);
@@ -430,12 +430,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           return info ? { badge: status, tooltip: info.label, color: new vscode.ThemeColor(info.color) } : undefined;
         },
       }),
-      new BranchDiffView(context, api, git, snapshots, output),
+      new BranchDiffyView(context, api, git, snapshots, output),
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     output.appendLine(message);
-    void vscode.window.showErrorMessage(`Branch Diff: ${message}`);
+    void vscode.window.showErrorMessage(`Branch Diffy: ${message}`);
     throw error;
   }
 }
